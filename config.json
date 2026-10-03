@@ -1,0 +1,47 @@
+{
+  "version": "0.9.1",
+  "current_year": 2026,
+  "current_round": 1,
+  "scenario_regex": "^1º turno$",
+  "history_years": [
+    2018,
+    2022
+  ],
+  "history_window_days": 120,
+  "default_n": 1200,
+  "default_design_effect": 1.5,
+  "credible_intervals": [
+    0.8,
+    0.95
+  ],
+  "posterior_draws": 4000,
+  "posterior_seed": 418,
+  "reml_maxiter": 120,
+  "external_election_error_enabled": true,
+  "external_election_error_sd_pp": 2.5,
+  "external_election_error_basis": "external literature prior; approximately 2 pp mean absolute shared election-level bias mapped to Normal SD",
+  "output_top_n": 5,
+  "backtest_days_before": [
+    30,
+    21,
+    14,
+    7,
+    3,
+    1
+  ],
+  "backtest_history_window_days": 120,
+  "candidate_status_file": "data/candidate_status_2026.csv",
+  "candidate_status_strict_from": "2026-09-11",
+  "current_use_final_ballot_only": true,
+  "valid_group_total_min": 95.0,
+  "valid_group_total_max": 105.0,
+  "implicit_valid_sum_min": 97.0,
+  "implicit_valid_sum_max": 103.0,
+  "implicit_total_candidate_sum_min": 50.0,
+  "implicit_total_candidate_sum_max": 95.0,
+  "historical_2018_publication_lag_days": 3,
+  "current_major_min_median_pp": 0.5,
+  "current_major_min_count": 5,
+  "current_major_max_count": 7,
+  "renormalize_removed_candidates": true
+}
