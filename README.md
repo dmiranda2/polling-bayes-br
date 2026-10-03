@@ -26,7 +26,6 @@ A v0.9.1 mudou o núcleo estatístico do projeto. As principais novidades são:
 
 - **modelo composicional conjunto:** todos os candidatos são ajustados simultaneamente, em vez de um modelo separado para cada um;
 - **coordenadas ILR:** a composição de votos é levada ao espaço euclidiano por uma transformação isométrica, seguindo a geometria de dados composicionais de [Egozcue et al. (2003)](https://doi.org/10.1023/A:1023818214614);
-- **sem projeção pós-hoc:** a soma 100% é respeitada por construção, não corrigida depois do ajuste;
 - **hiperparâmetros estimados:** seis escalas de variância do processo temporal, efeitos de instituto e ruído extra são estimadas por REML, em vez de escolhidas manualmente;
 - **efeitos de instituto aprendidos no ciclo atual:** não há transferência fixa do viés observado em 2018/2022 para 2026;
 - **duas incertezas separadas:** o modelo distingue a incerteza sobre a média latente das pesquisas da incerteza eleitoral comum à indústria;
@@ -49,8 +48,6 @@ Antes de qualquer ajuste estatístico, o código verifica:
 - composição da cédula usada na pesquisa;
 - candidatos fora da cédula vigente;
 - pesquisas incompletas ou estruturalmente ambíguas.
-
-Pesquisas ambíguas não são “consertadas” silenciosamente: o padrão é **fail closed** — se não for possível saber de forma defensável o que uma linha significa, ela fica fora do ajuste e aparece na auditoria.
 
 ### Fontes de dados
 
@@ -197,8 +194,6 @@ O modelo admite que institutos diferentes possam apresentar desvios persistentes
 
 Esses efeitos são estimados **junto com o estado eleitoral** e regularizados em direção a zero. Institutos com pouco dado disponível não recebem automaticamente grandes correções.
 
-Importante: a v0.9.1 **não transfere manualmente o viés observado em 2018/2022 para 2026**. O histórico continua útil para auditoria e backtest, mas não entra como uma correção fixa do tipo “este instituto costuma errar X pontos”.
-
 ---
 
 # Backtest
@@ -230,21 +225,7 @@ Esses valores são **diagnóstico em apenas dois ciclos**, não uma validação 
 
 ---
 
-# O que o modelo não tenta fazer
 
-A versão atual deliberadamente **não** tenta:
-
-- prever comparecimento individual;
-- prever campanha, debate ou evento futuro;
-- aprender uma distribuição de erro eleitoral comum a partir de somente dois ciclos;
-- usar Student-t ou volatilidade temporal variável;
-- estimar uma matriz de covariância cheia com dezenas de parâmetros;
-- atribuir pesos arbitrários de “qualidade” a institutos;
-- transformar o histórico recente de um instituto em correção fixa para o ciclo atual.
-
-Essas extensões podem ser estudadas, mas só valem a pena se melhorarem o desempenho fora da amostra.
-
----
 
 # Estrutura do projeto
 
@@ -329,7 +310,7 @@ Na v0.9.1, a suíte corrente contém **22 testes**.
 
 # Desenvolvimento e revisão do código
 
-A implementação da v0.9.1 foi **desenvolvida e refatorada com GPT (OpenAI)** e depois submetida a **revisão adversarial independente no Claude (Anthropic)**. As críticas dessa segunda revisão motivaram parte importante da simplificação do modelo, especialmente a passagem para um ajuste composicional conjunto, a remoção de hiperparâmetros manuais e a separação entre incerteza do *polling nowcast* e erro eleitoral comum.
+A implementação da v0.9.1 foi **desenvolvida e refatorada com GPT (OpenAI)** e depois submetida a **revisão adversarial independente no Claude (Anthropic)**. 
 
 Essa revisão por modelos diferentes é uma etapa adicional de checagem, não uma verificação formal. O repositório mantém testes automatizados, backtests, auditorias intermediárias e saídas reproduzíveis para permitir inspeção humana do pipeline.
 
@@ -363,4 +344,4 @@ https://doi.org/10.1038/s41562-018-0315-6
 
 # Nota de interpretação
 
-Este é um projeto estatístico experimental e auditável. O objetivo é organizar informação de pesquisas de maneira coerente e explicitar a incerteza — não substituir a votação real nem produzir certezas onde os dados não permitem.
+Este é um projeto estatístico experimental e auditável. O objetivo é organizar informação de pesquisas de maneira coerente e explicitar a incerteza — não substituir a votação real nem produzir certezas onde os dados não permitem. Use com moderação!
