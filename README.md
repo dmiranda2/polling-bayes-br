@@ -20,9 +20,9 @@ O resultado principal é um **nowcast**: uma estimativa do que as pesquisas, tom
 
 Ele não deve ser lido como uma previsão infalível da urna.
 
-## O que há de novo na v0.9.1
+## Principais características do modelo
 
-A v0.9.1 mudou o núcleo estatístico do projeto. As principais novidades são:
+O núcleo estatístico do projeto tem as seguintes características:
 
 - **modelo composicional conjunto:** todos os candidatos são ajustados simultaneamente, em vez de um modelo separado para cada um;
 - **coordenadas ILR:** a composição de votos é levada ao espaço euclidiano por uma transformação isométrica, seguindo a geometria de dados composicionais de [Egozcue et al. (2003)](https://doi.org/10.1023/A:1023818214614);
@@ -87,7 +87,7 @@ Ela responde à pergunta:
 
 Pesquisas diferentes podem compartilhar o **mesmo erro** — por exemplo, uma dificuldade comum em medir determinado grupo de eleitores. Esse erro não pode ser identificado simplesmente acumulando mais pesquisas do mesmo ciclo. Essa separação entre variância amostral, viés e erro não amostral é motivada pela literatura de *total survey error*, em particular por [Shirani-Mehr et al. (2018)](https://doi.org/10.1080/01621459.2018.1448823).
 
-Por isso a v0.9.1 permite adicionar uma camada externa de erro eleitoral. No `config.json` atual, a escala marginal aproximada usada para os dois líderes é de **2,5 pontos percentuais**.
+Por isso o modelo permite adicionar uma camada externa de erro eleitoral. No `config.json` atual, a escala marginal aproximada usada para os dois líderes é de **2,5 pontos percentuais**.
 
 Essa camada é uma hipótese externa, não algo “aprendido” a partir de apenas 2018 e 2022.
 
@@ -112,7 +112,7 @@ Isso evita dois problemas comuns:
 - previsões marginais que não somam 100%;
 - correlações entre candidatos adicionadas apenas depois do ajuste.
 
-A v0.9.1 trabalha diretamente no simplex de probabilidades.
+O modelo trabalha diretamente no simplex de probabilidades.
 
 ## 2. Transformação ILR
 
@@ -165,9 +165,7 @@ Aqui:
 
 ## 4. Poucos hiperparâmetros
 
-A versão anterior acumulou vários números fixados manualmente: intensidade do passeio aleatório, transferência histórica de viés, penalidade para instituto novo, inflação de tracking etc.
-
-A v0.9.1 removeu esses parâmetros manuais do núcleo do nowcast.
+O núcleo do nowcast evita parâmetros manuais desse tipo.
 
 Para evitar o extremo oposto — uma matriz de covariância enorme e mal identificada — usamos uma estrutura parcimoniosa com duas escalas por componente:
 
@@ -215,12 +213,11 @@ Em cada corte, o modelo só vê pesquisas que poderiam ser consideradas disponí
 
 Também é calculado um baseline deliberadamente simples: a média das pesquisas completas na mesma janela.
 
-No cache usado no desenvolvimento da v0.9, a média dos doze cortes foi aproximadamente:
+No cache usado no desenvolvimento, a média dos doze cortes foi aproximadamente:
 
 | Método | MAE médio | RMSE médio |
 |---|---:|---:|
-| v0.8.1 | 4,27 p.p. | 5,22 p.p. |
-| **v0.9.x** | **3,37 p.p.** | **4,27 p.p.** |
+| **modelo** | **3,37 p.p.** | **4,27 p.p.** |
 | média simples | 5,00 p.p. | 6,41 p.p. |
 
 Esses valores são **diagnóstico em apenas dois ciclos**, não uma validação suficiente para aprender uma distribuição completa de erro eleitoral. Como referência externa sobre a escala e a heterogeneidade histórica dos erros de pesquisas eleitorais, ver [Jennings & Wlezien (2018)](https://doi.org/10.1038/s41562-018-0315-6).
@@ -287,7 +284,7 @@ python src/run.py --no-fetch --as-of YYYY-MM-DD
 PYTHONPATH=src pytest -q
 ```
 
-Na v0.9.1, a suíte corrente contém **22 testes**.
+A suíte corrente contém **22 testes**.
 
 ---
 
@@ -312,7 +309,7 @@ Na v0.9.1, a suíte corrente contém **22 testes**.
 
 # Desenvolvimento e revisão do código
 
-A implementação da v0.9.1 foi **desenvolvida e refatorada com GPT (OpenAI)** e depois submetida a **revisão adversarial independente no Claude (Anthropic)**. 
+A implementação foi **desenvolvida e refatorada com GPT (OpenAI)** e depois submetida a **revisão adversarial independente no Claude (Anthropic)**. 
 
 Essa revisão por modelos diferentes é uma etapa adicional de checagem, não uma verificação formal. O repositório mantém testes automatizados, backtests, auditorias intermediárias e saídas reproduzíveis para permitir inspeção humana do pipeline.
 
