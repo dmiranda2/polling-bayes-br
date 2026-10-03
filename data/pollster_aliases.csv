@@ -1,0 +1,40 @@
+alias,canonical,relation,note
+Atlas,AtlasIntel,brand_alias,Atlas shorthand
+AtlasIntel,AtlasIntel,canonical,canonical label
+AtlasIntel/Bloomberg,AtlasIntel,publisher_partner,Bloomberg is publication/partner label
+Atlas/Bloomberg,AtlasIntel,publisher_partner,Bloomberg is publication/partner label
+Data Folha,Datafolha,typographic_alias,spacing variant
+Datafolha,Datafolha,canonical,canonical label
+Datapoder360,PoderData,former_brand,former/current brand variant in historical feeds
+PoderData,PoderData,canonical,canonical label
+Ideia Big Data,Ideia,former_brand,former brand of Instituto Ideia
+Ideia,Ideia,canonical,canonical label
+Instituto Ideia,Ideia,brand_alias,formal institute label
+Meio/Ideia,Ideia,publisher_partner,Meio survey is conducted with Instituto Ideia
+Ideia (Meio/Ideia),Ideia,publisher_partner,feed label for Meio/Ideia
+FSB Pesquisa,Nexus/FSB,former_brand,official Nexus history traces to Instituto FSB Pesquisa/IPRI
+FSB,Nexus/FSB,former_brand,short historical label
+Nexus,Nexus/FSB,rebrand,official successor/evolution in FSB group
+BTG/Nexus,Nexus/FSB,publisher_partner,BTG is contracting/publishing partner label
+Futura,Futura,canonical,canonical historical label
+Futura Inteligência,Futura,brand_alias,current full label
+Futura Inteligência (100% Cidades),100% Cidades,registered_pollster,2026 reports identify 100% Cidades as the registered fieldwork company and Futura as contractor
+Futura/100% Cidades,100% Cidades,registered_pollster,2026 reports identify 100% Cidades as the registered fieldwork company
+Verita,Veritá,typographic_alias,accent variant
+Veritá,Veritá,canonical,canonical label
+Instituto Verita,Veritá,brand_alias,formal institute label
+Instituto Veritá,Veritá,brand_alias,formal institute label
+CNT/MDA,MDA,publisher_partner,CNT contracting label with MDA institute
+MDA,MDA,canonical,canonical label
+Indexa/Broadcast,Indexa,publisher_partner,Broadcast publisher/partner label
+Indexa,Indexa,canonical,canonical label
+Parana,Paraná Pesquisas,typographic_alias,source truncation/accent variant
+Paraná,Paraná Pesquisas,typographic_alias,source shorthand
+Parana Pesquisas,Paraná Pesquisas,typographic_alias,accent variant
+Paraná Pesquisas,Paraná Pesquisas,canonical,canonical label
+Vox,Vox Brasil,brand_alias,2026 source shorthand points to Vox Brasil
+Vox Brasil,Vox Brasil,canonical,canonical label
+Alfa Inteligência,Alfa Inteligência,canonical,canonical label
+Alfa/TMC,Alfa Inteligência,publisher_partner,TMC is research publishing partner
+Alfa Inteligência/TMC,Alfa Inteligência,publisher_partner,TMC is research publishing partner
+100% Cidades,100% Cidades,canonical,canonical registered pollster label
