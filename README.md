@@ -91,6 +91,8 @@ Por isso a v0.9.1 permite adicionar uma camada externa de erro eleitoral. No `co
 
 Essa camada é uma hipótese externa, não algo “aprendido” a partir de apenas 2018 e 2022.
 
+Os **2,5 p.p.** são um prior externo baseado na literatura internacional; em uma próxima versão, essa escala será estimada especificamente a partir de dados brasileiros.
+
 ---
 
 # Como funciona tecnicamente
