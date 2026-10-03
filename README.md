@@ -12,7 +12,7 @@ A ideia é simples:
 
 1. cada pesquisa entra com a incerteza compatível com seu tamanho amostral e margem de erro;
 2. diferenças persistentes entre institutos são estimadas pelo próprio modelo;
-3. todos os candidatos são modelados **em conjunto**, de modo que as porcentagens sempre formem uma composição coerente de 100%;
+3. todos os candidatos são modelados **em conjunto**.
 4. pesquisas mais antigas perdem influência à medida que novas pesquisas aparecem, por meio de um estado latente que evolui no tempo;
 5. o modelo separa duas coisas diferentes: **incerteza sobre o consenso das pesquisas** e **erro eleitoral comum a toda a indústria de pesquisas**.
 
