@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
+
+# Reconstructable caches / outputs
+data/polls_master.csv
+data/polls_2018.csv
+data/polls_2022.csv
+data/polls_2026.csv
+output/
+output_*/
+out_*/
+tmp_*/
