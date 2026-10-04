@@ -551,33 +551,132 @@ def _random_effect_posterior(fit: HistoricalFit, group: str, value: object) -> t
 
 
 def election_effects(fit: HistoricalFit) -> pd.DataFrame:
+    """BLUPs for election-level common error with universal-kriging uncertainty."""
     rows = []
+    one = np.ones(len(fit.y), float)
+    Vinv_one = fit.Vinv_ones
+    if fit.free_mean and Vinv_one is None:
+        Vinv_one = cho_solve(fit.chol, one, check_finite=False)
+    Vinv_r = cho_solve(fit.chol, fit.residual, check_finite=False)
     for year in sorted(set(fit.years)):
-        b, vb = _random_effect_posterior(fit, "election", year)
-        common = fit.mu + b
-        vcommon = fit.var_mu + vb
+        mask = (fit.years == int(year)).astype(float)
+        k = fit.tau_e ** 2 * mask
+        b = float(k @ Vinv_r)
+        Vinv_k = cho_solve(fit.chol, k, check_finite=False)
+        base = max(float(fit.tau_e ** 2 - k @ Vinv_k), 0.0)
+        if fit.free_mean:
+            a = float(k @ Vinv_one)
+            var_common = base + (1.0 - a) ** 2 * fit.var_mu
+        else:
+            var_common = base
         rows.append({
             "election_year": int(year),
             "mu_ilr": fit.mu,
             "election_re_ilr": b,
-            "common_error_ilr": common,
-            "common_error_sd_ilr": math.sqrt(max(vcommon, 0.0)),
+            "common_error_ilr": fit.mu + b,
+            "common_error_sd_ilr": math.sqrt(max(var_common, 1e-12)),
         })
     return pd.DataFrame(rows)
 
 
-def _heldout_consensus(hold: pd.DataFrame, fit: HistoricalFit) -> tuple[float, float, int]:
-    adjusted = []
-    variances = []
-    for r in hold.itertuples(index=False):
-        h, vh = _random_effect_posterior(fit, "pollster", r.pollster)
-        adjusted.append(float(r.pair_error_ilr) - h)
-        variances.append(float(r.sampling_var_ilr) + fit.tau_p ** 2 + vh)
-    w = 1.0 / np.maximum(np.asarray(variances, float), 1e-12)
-    vals = np.asarray(adjusted, float)
-    mean = float(np.sum(w * vals) / np.sum(w))
-    var = float(1.0 / np.sum(w))
-    return mean, var, len(vals)
+def _fit_fixed_tau_e(df: pd.DataFrame, tau_e: float) -> HistoricalFit:
+    """Fit nuisance pollster/poll scales with a fixed zero-mean election prior.
+
+    This is used only for the current external-prior baseline in LOO, so the
+    baseline is the same comparison target for the free- and zero-mean models.
+    """
+    if len(df) < 6 or df["election_year"].nunique() < 2:
+        raise ValueError("historical baseline needs at least two elections and six polls")
+    y = pd.to_numeric(df["pair_error_ilr"], errors="raise").to_numpy(float)
+    years = pd.to_numeric(df["election_year"], errors="raise").to_numpy(int)
+    pollsters = df["pollster"].astype(str).map(_norm_text).to_numpy()
+    sampling_var = pd.to_numeric(df["sampling_var_ilr"], errors="raise").to_numpy(float)
+    tau_e = max(float(tau_e), 1e-8)
+
+    def nll(log_scales: np.ndarray, details: bool = False):
+        tau_h, tau_p = np.exp(np.asarray(log_scales, float))
+        try:
+            V = _covariance(years, pollsters, sampling_var, tau_e, tau_h, tau_p)
+            cf = cho_factor(V, lower=True, check_finite=False)
+            Vinv_y = cho_solve(cf, y, check_finite=False)
+            logdetV = 2.0 * float(np.log(np.diag(cf[0])).sum())
+            val = 0.5 * (logdetV + float(y @ Vinv_y) + len(y) * math.log(2 * math.pi))
+            if not np.isfinite(val):
+                raise FloatingPointError
+            if details:
+                return val, V, cf, tau_h, tau_p
+            return val
+        except (np.linalg.LinAlgError, FloatingPointError, ValueError):
+            return None if details else 1e100
+
+    best = None
+    for st in ([0.03, 0.03], [0.08, 0.05], [0.15, 0.10]):
+        res = minimize(lambda z: nll(z, False), np.log(st), method="L-BFGS-B",
+                       bounds=[(-8.0, 0.5)] * 2, options={"maxiter": 500, "ftol": 1e-11})
+        if np.isfinite(res.fun) and (best is None or res.fun < best.fun):
+            best = res
+    if best is None:
+        raise RuntimeError("fixed-tau baseline optimization failed")
+    det = nll(best.x, True)
+    if det is None:
+        raise RuntimeError("could not reconstruct fixed-tau baseline fit")
+    val, V, cf, tau_h, tau_p = det
+    return HistoricalFit(
+        free_mean=False, mu=0.0, var_mu=0.0, tau_e=tau_e, tau_h=float(tau_h),
+        tau_p=float(tau_p), nll=float(val), years=years, pollsters=pollsters, y=y,
+        sampling_var=sampling_var, V=V, chol=cf, residual=y.copy(), Vinv_ones=None,
+    )
+
+
+def _predict_holdout_vector(train: pd.DataFrame, hold: pd.DataFrame,
+                            fit: HistoricalFit) -> tuple[np.ndarray, np.ndarray]:
+    """Exact Gaussian plug-in predictive distribution for an omitted election.
+
+    The held-out election has no election-level covariance with training rows,
+    but institutes appearing in both sets share their pollster random effect.
+    For a free intercept, the universal-kriging correction propagates uncertainty
+    in the GLS estimate of ``mu``.
+    """
+    yt = fit.y
+    yh_years = pd.to_numeric(hold["election_year"], errors="raise").to_numpy(int)
+    yh_pollsters = hold["pollster"].astype(str).map(_norm_text).to_numpy()
+    yh_sampling = pd.to_numeric(hold["sampling_var_ilr"], errors="raise").to_numpy(float)
+    nh = len(hold)
+    nt = len(train)
+
+    # Held-out covariance: one common election shock plus pollster and poll noise.
+    Vhh = np.diag(yh_sampling + fit.tau_p ** 2)
+    Vhh += np.ones((nh, nh), float) * fit.tau_e ** 2
+    Vhh += (yh_pollsters[:, None] == yh_pollsters[None, :]).astype(float) * fit.tau_h ** 2
+
+    # Cross-covariance is only through recurring pollsters: the election is new.
+    Vht = (yh_pollsters[:, None] == fit.pollsters[None, :]).astype(float) * fit.tau_h ** 2
+    Vinv_r = cho_solve(fit.chol, fit.residual, check_finite=False)
+    mean = np.full(nh, fit.mu, float) + Vht @ Vinv_r
+    Vinv_Vth = cho_solve(fit.chol, Vht.T, check_finite=False)
+    cov = Vhh - Vht @ Vinv_Vth
+
+    if fit.free_mean:
+        one_t = np.ones(nt, float)
+        one_h = np.ones(nh, float)
+        Vinv_one = fit.Vinv_ones
+        if Vinv_one is None:
+            Vinv_one = cho_solve(fit.chol, one_t, check_finite=False)
+        d = one_h - Vht @ Vinv_one
+        cov = cov + np.outer(d, d) * fit.var_mu
+
+    cov = (cov + cov.T) / 2.0
+    vals, vecs = np.linalg.eigh(cov)
+    vals = np.clip(vals, 1e-12, None)
+    cov = (vecs * vals) @ vecs.T
+    return mean, cov
+
+
+def _fixed_consensus_weights(hold: pd.DataFrame) -> np.ndarray:
+    """Model-independent holdout consensus weights based only on sampling variance."""
+    s2 = pd.to_numeric(hold["sampling_var_ilr"], errors="raise").to_numpy(float)
+    w = 1.0 / np.maximum(s2, 1e-12)
+    return w / w.sum()
 
 
 def _baseline_ilr_sd_from_result(row: pd.Series, target_pp: float = 2.5) -> float:
@@ -603,37 +702,59 @@ def _baseline_ilr_sd_from_result(row: pd.Series, target_pp: float = 2.5) -> floa
 
 def loo_by_election(df: pd.DataFrame, results: pd.DataFrame, free_mean: bool,
                     baseline_pp: float = 2.5) -> pd.DataFrame:
+    """Whole-election leave-one-out validation on one fixed observable.
+
+    The observable is a sampling-variance-weighted consensus of the held-out
+    poll-minus-result ILR errors. Its weights and realized value do not depend on
+    which model is being evaluated, making free-mean, zero-mean, and the current
+    2.5 p.p. baseline directly comparable.
+    """
     rows = []
     for year in sorted(df["election_year"].unique()):
-        train = df[df["election_year"].ne(year)].copy()
-        hold = df[df["election_year"].eq(year)].copy()
+        train = df[df["election_year"].ne(year)].copy().reset_index(drop=True)
+        hold = df[df["election_year"].eq(year)].copy().reset_index(drop=True)
         if train["election_year"].nunique() < 2 or hold.empty:
             continue
-        fit = fit_historical_model(train, free_mean=free_mean)
-        obs, obs_var, n = _heldout_consensus(hold, fit)
-        pred_mean = fit.mu
-        pred_var = fit.tau_e ** 2 + fit.var_mu + obs_var
-        pred_sd = math.sqrt(max(pred_var, 1e-12))
-        z = (obs - pred_mean) / pred_sd
-        logscore = float(norm.logpdf(obs, loc=pred_mean, scale=pred_sd))
+        w = _fixed_consensus_weights(hold)
+        yhold = pd.to_numeric(hold["pair_error_ilr"], errors="raise").to_numpy(float)
+        observed = float(w @ yhold)
+        observed_sampling_sd = math.sqrt(float(w @ np.diag(
+            pd.to_numeric(hold["sampling_var_ilr"], errors="raise").to_numpy(float)
+        ) @ w))
 
+        fit = fit_historical_model(train, free_mean=free_mean)
+        m, C = _predict_holdout_vector(train, hold, fit)
+        pred_mean = float(w @ m)
+        pred_var = float(w @ C @ w)
+        pred_sd = math.sqrt(max(pred_var, 1e-12))
+        z = (observed - pred_mean) / pred_sd
+        logscore = float(norm.logpdf(observed, loc=pred_mean, scale=pred_sd))
+
+        # Current production comparator: zero-centered common election error with
+        # 2.5 p.p. marginal candidate scale, while nuisance house/poll dispersion
+        # is estimated from training data under that fixed common-error scale.
         rr = results[results["election_year"].eq(year)].iloc[0]
-        base_sd0 = _baseline_ilr_sd_from_result(rr, baseline_pp)
-        base_sd = math.sqrt(base_sd0 ** 2 + obs_var)
-        base_logscore = float(norm.logpdf(obs, loc=0.0, scale=base_sd))
+        base_tau = _baseline_ilr_sd_from_result(rr, baseline_pp)
+        base_fit = _fit_fixed_tau_e(train, base_tau)
+        bm, BC = _predict_holdout_vector(train, hold, base_fit)
+        base_mean = float(w @ bm)
+        base_var = float(w @ BC @ w)
+        base_sd = math.sqrt(max(base_var, 1e-12))
+        base_logscore = float(norm.logpdf(observed, loc=base_mean, scale=base_sd))
 
         rows.append({
             "heldout_year": int(year),
             "model": "free_mean" if free_mean else "zero_mean",
-            "n_holdout_pollsters": int(n),
-            "observed_common_error_ilr": obs,
-            "observed_consensus_sd_ilr": math.sqrt(obs_var),
+            "n_holdout_pollsters": int(len(hold)),
+            "observed_consensus_ilr": observed,
+            "observed_sampling_sd_ilr": observed_sampling_sd,
             "pred_mean_ilr": pred_mean,
             "pred_sd_ilr": pred_sd,
             "z_error": z,
             "covered_80": abs(z) <= norm.ppf(0.90),
             "covered_95": abs(z) <= norm.ppf(0.975),
             "log_score": logscore,
+            "baseline_2p5_pred_mean_ilr": base_mean,
             "baseline_2p5_pred_sd_ilr": base_sd,
             "baseline_2p5_log_score": base_logscore,
             "delta_log_score_vs_2p5": logscore - base_logscore,
@@ -765,7 +886,7 @@ def write_report(out: Path, fits: pd.DataFrame, effects: pd.DataFrame, loo: pd.D
         "## 7-day election effects", "",
         md(eff7, ["election_year", "common_error_ilr", "common_error_sd_ilr", "common_error_margin_pp"]), "",
         "## 7-day leave-one-election-out", "",
-        md(loo7, ["heldout_year", "model", "observed_common_error_ilr", "pred_mean_ilr", "pred_sd_ilr", "z_error", "covered_80", "covered_95", "delta_log_score_vs_2p5"]), "",
+        md(loo7, ["heldout_year", "model", "observed_consensus_ilr", "pred_mean_ilr", "pred_sd_ilr", "z_error", "covered_80", "covered_95", "delta_log_score_vs_2p5"]), "",
         "## 7-day jackknife of the free mean", "",
         md(jk7, ["excluded_year", "mu_ilr", "mu_sd_ilr", "tau_e_ilr", "tau_h_ilr", "tau_p_ilr"]), "",
         "## Robust second-stage sensitivity (7-day effects)", "",
