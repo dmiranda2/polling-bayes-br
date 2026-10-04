@@ -141,6 +141,28 @@ def read_poll_snapshot(path: str | Path) -> pd.DataFrame:
     return d
 
 
+def append_poll_supplement(polls: pd.DataFrame, path: str | Path | None) -> pd.DataFrame:
+    """Append a small audited historical supplement when the public snapshot has a gap.
+
+    The supplement must already use the Poder360-like columns consumed by this
+    module. It is deliberately additive and is used only to fill documented
+    source gaps; duplicate rows are removed on the natural poll/scenario/candidate key.
+    """
+    if path is None:
+        return polls.copy()
+    path = Path(path)
+    if not path.exists():
+        return polls.copy()
+    extra = pd.read_csv(path, low_memory=False)
+    if extra.empty:
+        return polls.copy()
+    out = pd.concat([polls, extra], ignore_index=True, sort=False)
+    key = [c for c in ["ano", "turno", "id_pesquisa", "id_cenario", "instituto", "nome_candidato"] if c in out.columns]
+    if key:
+        out = out.drop_duplicates(key, keep="last")
+    return out.reset_index(drop=True)
+
+
 def _candidate_rows(g: pd.DataFrame) -> pd.DataFrame:
     if "condicao" not in g.columns:
         return g
@@ -206,6 +228,11 @@ def source_filter_diagnostics(polls: pd.DataFrame, results: pd.DataFrame) -> pd.
         else:
             ys = yn
         add(year, "stimulated_or_fallback", "rows", "all", len(ys))
+        if not ys.empty and ys["data"].notna().any():
+            add(year, "stimulated_or_fallback", "date_min", ys["data"].min().date().isoformat(), 1)
+            add(year, "stimulated_or_fallback", "date_max", ys["data"].max().date().isoformat(), 1)
+            for val, cnt in ys["data"].dropna().dt.strftime("%Y-%m-%d").value_counts().sort_index().tail(12).items():
+                add(year, "stimulated_or_fallback", "recent_date", val, cnt)
         lo = pd.Timestamp(res.election_date) - pd.Timedelta(days=14)
         hi = pd.Timestamp(res.election_date)
         yw = ys[ys["data"].between(lo, hi, inclusive="both")].copy()
@@ -759,6 +786,7 @@ def main() -> None:
     ap.add_argument("--results", default="data/presidential_first_round_results.csv")
     ap.add_argument("--polls", default="data/cache/br_poder360_pesquisas_microdados.csv.gz")
     ap.add_argument("--polls-url", default=BASE_DOS_DADOS_URL)
+    ap.add_argument("--supplement-2018", default="data/historical_2018_final_window.csv")
     ap.add_argument("--out", default="output_historical_error")
     ap.add_argument("--windows", default="3,7,14")
     ap.add_argument("--no-download", action="store_true")
@@ -773,6 +801,7 @@ def main() -> None:
             raise FileNotFoundError(poll_path)
         download_snapshot(args.polls_url, poll_path)
     polls = read_poll_snapshot(poll_path)
+    polls = append_poll_supplement(polls, args.supplement_2018)
     source_diag = source_filter_diagnostics(polls, results)
     source_diag.to_csv(out / "historical_source_diagnostics.csv", index=False)
 
@@ -811,6 +840,7 @@ def main() -> None:
 
     manifest = {
         "source": args.polls_url,
+        "supplement_2018": args.supplement_2018 if Path(args.supplement_2018).exists() else None,
         "windows": list(windows),
         "years": sorted(int(x) for x in errors["election_year"].unique()),
         "primary_window_days": 7,
