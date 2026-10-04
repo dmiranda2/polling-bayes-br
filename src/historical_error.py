@@ -1,35 +1,50 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import gzip
+import json
 import math
 import re
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.request import Request, urlopen
 
 import numpy as np
 import pandas as pd
 from scipy.linalg import cho_factor, cho_solve
 from scipy.optimize import minimize
-from scipy.stats import norm
+from scipy.stats import norm, t as student_t
 
-BD_PODER360_URL = (
+BASE_DOS_DADOS_URL = (
     "https://storage.googleapis.com/basedosdados-public/"
     "one-click-download/br_poder360_pesquisas/microdados/microdados.csv.gz"
 )
 
+WINDOWS_DEFAULT = (3, 7, 14)
+
 
 def _norm_text(value: object) -> str:
-    s = "" if value is None or (isinstance(value, float) and np.isnan(value)) else str(value)
-    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return ""
+    s = unicodedata.normalize("NFKD", str(value))
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
     s = re.sub(r"[^A-Za-z0-9]+", " ", s).strip().upper()
     return re.sub(r"\s+", " ", s)
 
 
-def _split_aliases(value: object) -> set[str]:
-    if value is None or (isinstance(value, float) and np.isnan(value)):
-        return set()
-    return {_norm_text(x) for x in str(value).split("|") if _norm_text(x)}
+def _alias_match(name: object, aliases: str) -> bool:
+    n = _norm_text(name)
+    if not n:
+        return False
+    return n in {_norm_text(x) for x in str(aliases).split("|") if str(x).strip()}
+
+
+def _numeric(s: pd.Series) -> pd.Series:
+    if pd.api.types.is_numeric_dtype(s):
+        return pd.to_numeric(s, errors="coerce")
+    return pd.to_numeric(s.astype(str).str.replace(",", ".", regex=False), errors="coerce")
 
 
 def _effective_n(n: float, moe_pp: float, default_n: float = 1200.0, design_effect: float = 1.5) -> float:
@@ -42,21 +57,30 @@ def _effective_n(n: float, moe_pp: float, default_n: float = 1200.0, design_effe
     return max(50.0, min(vals) if vals else float(default_n) / max(float(design_effect), 1.0))
 
 
-def load_pollster_aliases(path: str | Path | None) -> dict[str, str]:
-    if path is None:
-        return {}
-    p = Path(path)
-    if not p.exists():
-        return {}
-    d = pd.read_csv(p)
-    if not {"alias", "canonical"}.issubset(d.columns):
-        return {}
-    return {_norm_text(a): str(c) for a, c in zip(d["alias"], d["canonical"]) if _norm_text(a)}
+def pair_ilr(p_ref: float, p_opp: float) -> float:
+    """Leading Helmert ILR coordinate: (log p_ref - log p_opp)/sqrt(2)."""
+    p_ref = float(p_ref)
+    p_opp = float(p_opp)
+    if not (p_ref > 0 and p_opp > 0):
+        raise ValueError("pair shares must be strictly positive")
+    return float((math.log(p_ref) - math.log(p_opp)) / math.sqrt(2.0))
 
 
-def canonical_pollster(name: object, aliases: dict[str, str]) -> str:
-    raw = "" if name is None else str(name).strip()
-    return aliases.get(_norm_text(raw), raw)
+def pair_ilr_sampling_var(p_ref: float, p_opp: float, n_eff: float) -> float:
+    """Delta-method variance for the leading pair ILR coordinate.
+
+    For a multinomial composition and z=(log p1-log p2)/sqrt(2),
+    Var(z) ~= (1/p1 + 1/p2)/(2 n_eff).
+    The formula is invariant to whether the published values are later
+    renormalized to valid votes only, as long as p1 and p2 are the shares
+    actually sampled in the reported composition.
+    """
+    p_ref = float(p_ref)
+    p_opp = float(p_opp)
+    n_eff = max(float(n_eff), 1.0)
+    if not (p_ref > 0 and p_opp > 0):
+        raise ValueError("pair shares must be strictly positive")
+    return float((1.0 / p_ref + 1.0 / p_opp) / (2.0 * n_eff))
 
 
 def load_results(path: str | Path) -> pd.DataFrame:
@@ -68,497 +92,675 @@ def load_results(path: str | Path) -> pd.DataFrame:
     }
     missing = required - set(d.columns)
     if missing:
-        raise ValueError(f"Historical result file missing columns: {sorted(missing)}")
-    d = d.copy()
+        raise ValueError(f"results file missing columns: {sorted(missing)}")
     d["election_year"] = pd.to_numeric(d["election_year"], errors="raise").astype(int)
-    d["election_date"] = pd.to_datetime(d["election_date"], errors="raise")
+    d["election_date"] = pd.to_datetime(d["election_date"], errors="raise").dt.normalize()
     for c in ["reference_votes", "opponent_votes", "total_valid_votes"]:
         d[c] = pd.to_numeric(d[c], errors="raise").astype(float)
-    d["reference_share"] = d["reference_votes"] / d["total_valid_votes"]
-    d["opponent_share"] = d["opponent_votes"] / d["total_valid_votes"]
-    d["result_pair_ilr"] = np.log(d["reference_share"] / d["opponent_share"]) / np.sqrt(2.0)
-    d["result_margin_pp"] = 100.0 * (d["reference_share"] - d["opponent_share"])
+    if (d[["reference_votes", "opponent_votes", "total_valid_votes"]] <= 0).any().any():
+        raise ValueError("results counts must be positive")
+    if ((d["reference_votes"] + d["opponent_votes"]) > d["total_valid_votes"]).any():
+        raise ValueError("pair votes exceed total valid votes")
+    d["result_ref_share"] = d["reference_votes"] / d["total_valid_votes"]
+    d["result_opp_share"] = d["opponent_votes"] / d["total_valid_votes"]
+    d["result_pair_ilr"] = [pair_ilr(a, b) for a, b in zip(d["result_ref_share"], d["result_opp_share"])]
+    return d.sort_values("election_year").reset_index(drop=True)
+
+
+def download_snapshot(url: str, dest: str | Path) -> Path:
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists() and dest.stat().st_size > 0:
+        return dest
+    req = Request(url, headers={"User-Agent": "polling-bayes-br/1.0 historical calibration"})
+    with urlopen(req, timeout=180) as r, open(dest, "wb") as f:  # noqa: S310 - fixed public data URL
+        while True:
+            chunk = r.read(1024 * 1024)
+            if not chunk:
+                break
+            f.write(chunk)
+    if dest.stat().st_size == 0:
+        raise RuntimeError("downloaded historical poll snapshot is empty")
+    return dest
+
+
+def read_poll_snapshot(path: str | Path) -> pd.DataFrame:
+    path = Path(path)
+    compression = "gzip" if path.suffix == ".gz" else "infer"
+    d = pd.read_csv(path, compression=compression, low_memory=False)
+    # Normalize a few historical aliases if an older snapshot is supplied.
+    ren = {
+        "pesquisa_id": "id_pesquisa",
+        "cenario_id": "id_cenario",
+        "voto_tipo": "tipo_voto",
+        "candidato": "nome_candidato",
+        "qtd_entrevistas": "quantidade_entrevistas",
+        "data_pesquisa": "data",
+    }
+    d = d.rename(columns={k: v for k, v in ren.items() if k in d.columns and v not in d.columns})
     return d
 
 
-def load_poder360_history(path_or_url: str | Path | None = None) -> pd.DataFrame:
-    source = BD_PODER360_URL if path_or_url is None else str(path_or_url)
-    return pd.read_csv(source, compression="infer", low_memory=False)
+def _candidate_rows(g: pd.DataFrame) -> pd.DataFrame:
+    if "condicao" not in g.columns:
+        return g
+    cond = _numeric(g["condicao"])
+    # Poder360 documents candidate rows as condicao=0. If the field is entirely
+    # missing/unparseable, do not silently discard everything.
+    if cond.notna().any():
+        return g[cond.eq(0)].copy()
+    return g
 
 
-def _poll_type_is_stimulated(s: pd.Series) -> pd.Series:
-    return s.astype(str).map(_norm_text).str.contains("ESTIMUL", na=False)
+def _scenario_candidates(g: pd.DataFrame) -> int:
+    gg = _candidate_rows(g)
+    return int(gg["nome_candidato"].astype(str).nunique())
 
 
-def _national_mask(s: pd.Series) -> pd.Series:
-    raw = s.astype("string")
-    norm = raw.fillna("").map(_norm_text)
-    return raw.isna() | norm.isin(["", "BR", "BRASIL"])
-
-
-def _candidate_alias_match(name_norm: str, aliases: set[str]) -> bool:
-    if name_norm in aliases:
-        return True
-    # Only allow a conservative token-contained fallback for aliases with >= 2 tokens.
-    tokens = set(name_norm.split())
-    for a in aliases:
-        at = a.split()
-        if len(at) >= 2 and set(at).issubset(tokens):
-            return True
-    return False
-
-
-def prepare_historical_final_polls(
-    raw: pd.DataFrame,
+def extract_window_errors(
+    polls: pd.DataFrame,
     results: pd.DataFrame,
-    window_days: int = 7,
-    pollster_aliases: dict[str, str] | None = None,
+    window_days: int,
     default_n: float = 1200.0,
     design_effect: float = 1.5,
-) -> pd.DataFrame:
-    """Build one final national first-round poll per institute and election.
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Build one latest national first-round poll per institute/election.
 
-    The reference direction is fixed by ``results`` (for this project: PT candidate
-    minus the principal rival). Poll percentages are converted to a valid-vote
-    subcomposition by renormalizing candidate rows inside the selected scenario.
+    The target quantity is the leading pair log-ratio. This ratio is unchanged
+    by converting total-vote shares to valid-vote shares, which removes one
+    otherwise fragile historical harmonization step.
     """
-    aliases = pollster_aliases or {}
-    required = {
-        "id_pesquisa", "ano", "sigla_uf", "cargo", "data", "instituto", "tipo",
-        "turno", "tipo_voto", "id_cenario", "nome_candidato", "condicao", "percentual",
-        "quantidade_entrevistas", "margem_mais",
-    }
-    missing = required - set(raw.columns)
+    d = polls.copy()
+    needed = {"ano", "cargo", "data", "instituto", "turno", "nome_candidato", "percentual"}
+    missing = needed - set(d.columns)
     if missing:
-        raise ValueError(f"Poder360 historical file missing columns: {sorted(missing)}")
+        raise ValueError(f"poll snapshot missing columns: {sorted(missing)}")
 
-    d = raw.copy()
-    d["ano"] = pd.to_numeric(d["ano"], errors="coerce")
-    d["turno"] = pd.to_numeric(d["turno"], errors="coerce")
-    d["condicao"] = pd.to_numeric(d["condicao"], errors="coerce")
-    d["data"] = pd.to_datetime(d["data"], errors="coerce")
-    years = set(results["election_year"].astype(int))
-    d = d[
-        d["ano"].isin(years)
-        & d["cargo"].astype(str).map(_norm_text).eq("PRESIDENTE")
-        & _national_mask(d["sigla_uf"])
-        & d["turno"].eq(1)
-        & _poll_type_is_stimulated(d["tipo"])
-        & d["condicao"].eq(0)
-        & d["data"].notna()
-    ].copy()
+    d["ano"] = pd.to_numeric(d["ano"], errors="coerce").astype("Int64")
+    d["turno"] = pd.to_numeric(d["turno"], errors="coerce").astype("Int64")
+    d["data"] = pd.to_datetime(d["data"], errors="coerce").dt.normalize()
+    d["percentual"] = _numeric(d["percentual"])
+    d["instituto"] = d["instituto"].astype(str).str.strip()
+
+    cargo = d["cargo"].map(_norm_text)
+    d = d[cargo.eq("PRESIDENTE") & d["turno"].eq(1)].copy()
+
+    if "sigla_uf" in d.columns:
+        uf = d["sigla_uf"].fillna("").map(_norm_text)
+        d = d[uf.isin(["", "BR", "BRASIL"])].copy()
+
+    if "tipo" in d.columns:
+        tipo = d["tipo"].fillna("").map(_norm_text)
+        has_stim = tipo.str.contains("ESTIMUL", regex=False)
+        # If the source actually distinguishes stimulated polls, use them.
+        if has_stim.any():
+            d = d[has_stim].copy()
+
+    d = d[d["data"].notna() & d["percentual"].gt(0) & d["instituto"].ne("")].copy()
     if d.empty:
-        raise RuntimeError("No national stimulated first-round candidate rows found")
+        raise RuntimeError("no national first-round presidential polls after base filters")
 
-    d["percentual"] = pd.to_numeric(d["percentual"], errors="coerce")
-    d["quantidade_entrevistas"] = pd.to_numeric(d["quantidade_entrevistas"], errors="coerce")
-    d["margem_mais"] = pd.to_numeric(d["margem_mais"], errors="coerce")
-    d["candidate_norm"] = d["nome_candidato"].map(_norm_text)
-    d["pollster_canonical"] = d["instituto"].map(lambda x: canonical_pollster(x, aliases))
+    if "id_pesquisa" not in d.columns:
+        d["id_pesquisa"] = np.arange(len(d)).astype(str)
+    if "id_cenario" not in d.columns:
+        d["id_cenario"] = ""
+    if "tipo_voto" not in d.columns:
+        d["tipo_voto"] = ""
+    if "quantidade_entrevistas" not in d.columns:
+        d["quantidade_entrevistas"] = np.nan
+    if "margem_mais" not in d.columns:
+        d["margem_mais"] = np.nan
 
-    result_by_year = {int(r.election_year): r for r in results.itertuples(index=False)}
+    d["quantidade_entrevistas"] = _numeric(d["quantidade_entrevistas"])
+    d["margem_mais"] = _numeric(d["margem_mais"])
+
     rows: list[dict] = []
+    audit: list[dict] = []
 
-    for (year, poll_id, scenario_id), g in d.groupby(["ano", "id_pesquisa", "id_cenario"], dropna=False, sort=False):
-        year = int(year)
-        rr = result_by_year.get(year)
-        if rr is None:
-            continue
-        days_before = int((pd.Timestamp(rr.election_date).normalize() - g["data"].max().normalize()).days)
-        if days_before < 0 or days_before > int(window_days):
-            continue
+    for res in results.itertuples(index=False):
+        year = int(res.election_year)
+        lo = pd.Timestamp(res.election_date) - pd.Timedelta(days=int(window_days))
+        hi = pd.Timestamp(res.election_date)
+        y = d[d["ano"].eq(year) & d["data"].between(lo, hi, inclusive="both")].copy()
+        initial_rows = len(y)
+        initial_polls = int(y["id_pesquisa"].astype(str).nunique()) if not y.empty else 0
 
-        pct = g["percentual"].dropna().astype(float)
-        if pct.empty:
-            continue
-        # Some mirrors may store proportions rather than percentages.
-        scale = 100.0 if pct.max() <= 1.5 and pct.sum() <= 1.5 else 1.0
-        gg = g.loc[pct.index].copy()
-        gg["pct_work"] = pct * scale
-        candidate_mass = float(gg["pct_work"].sum())
-        if not (50.0 <= candidate_mass <= 105.0):
+        if y.empty:
+            audit.append({
+                "election_year": year, "window_days": int(window_days),
+                "rows_in_window": 0, "polls_in_window": 0,
+                "pair_scenarios": 0, "institutes_retained": 0,
+            })
             continue
 
-        ref_aliases = _split_aliases(rr.reference_aliases) | {_norm_text(rr.reference_candidate)}
-        opp_aliases = _split_aliases(rr.opponent_aliases) | {_norm_text(rr.opponent_candidate)}
-        ref_vals = gg.loc[gg["candidate_norm"].map(lambda x: _candidate_alias_match(x, ref_aliases)), "pct_work"]
-        opp_vals = gg.loc[gg["candidate_norm"].map(lambda x: _candidate_alias_match(x, opp_aliases)), "pct_work"]
-        if ref_vals.empty or opp_vals.empty:
-            continue
-        # Multiple matches usually indicate duplicate source rows; fail closed if materially inconsistent.
-        if ref_vals.max() - ref_vals.min() > 0.25 or opp_vals.max() - opp_vals.min() > 0.25:
-            continue
-        ref_pct = float(ref_vals.median()) / candidate_mass
-        opp_pct = float(opp_vals.median()) / candidate_mass
-        if ref_pct <= 0 or opp_pct <= 0 or ref_pct >= 1 or opp_pct >= 1:
+        y["is_ref"] = y["nome_candidato"].map(lambda x: _alias_match(x, res.reference_aliases))
+        y["is_opp"] = y["nome_candidato"].map(lambda x: _alias_match(x, res.opponent_aliases))
+
+        scenario_cols = ["id_pesquisa", "id_cenario"]
+        candidates: list[dict] = []
+        for (poll_id, scen_id), g in y.groupby(scenario_cols, dropna=False, sort=False):
+            ref = g[g["is_ref"]]
+            opp = g[g["is_opp"]]
+            if len(ref) != 1 or len(opp) != 1:
+                continue
+            ref_pct = float(ref["percentual"].iloc[0])
+            opp_pct = float(opp["percentual"].iloc[0])
+            if not (0 < ref_pct <= 100 and 0 < opp_pct <= 100):
+                continue
+            candidate_rows = _candidate_rows(g)
+            candidate_mass = float(candidate_rows["percentual"].sum())
+            n_cand = _scenario_candidates(g)
+            valid = _norm_text(g["tipo_voto"].iloc[0]).find("VALID") >= 0
+            n_rep = float(pd.to_numeric(g["quantidade_entrevistas"], errors="coerce").median())
+            moe = float(pd.to_numeric(g["margem_mais"], errors="coerce").median())
+            institute = str(g["instituto"].iloc[0]).strip()
+            date = pd.Timestamp(g["data"].iloc[0]).normalize()
+            neff = _effective_n(n_rep, moe, default_n, design_effect)
+            p_ref = ref_pct / 100.0
+            p_opp = opp_pct / 100.0
+            z_poll = pair_ilr(p_ref, p_opp)
+            s2 = pair_ilr_sampling_var(p_ref, p_opp, neff)
+            candidates.append({
+                "election_year": year,
+                "window_days": int(window_days),
+                "election_date": pd.Timestamp(res.election_date).date().isoformat(),
+                "poll_date": date.date().isoformat(),
+                "days_before": int((pd.Timestamp(res.election_date) - date).days),
+                "poll_id": str(poll_id),
+                "scenario_id": str(scen_id),
+                "pollster": institute,
+                "vote_basis": str(g["tipo_voto"].iloc[0]),
+                "n_reported": n_rep,
+                "moe_pp": moe,
+                "n_eff": neff,
+                "n_candidate_rows": n_cand,
+                "candidate_mass_pct": candidate_mass,
+                "ref_candidate": str(res.reference_candidate),
+                "opp_candidate": str(res.opponent_candidate),
+                "ref_poll_pct": ref_pct,
+                "opp_poll_pct": opp_pct,
+                "ref_result_pct": 100.0 * float(res.result_ref_share),
+                "opp_result_pct": 100.0 * float(res.result_opp_share),
+                "poll_pair_ilr": z_poll,
+                "result_pair_ilr": float(res.result_pair_ilr),
+                "pair_error_ilr": z_poll - float(res.result_pair_ilr),
+                "sampling_var_ilr": s2,
+                "sampling_sd_ilr": math.sqrt(s2),
+                "prefer_valid": int(valid),
+            })
+
+        cand = pd.DataFrame(candidates)
+        if cand.empty:
+            audit.append({
+                "election_year": year, "window_days": int(window_days),
+                "rows_in_window": initial_rows, "polls_in_window": initial_polls,
+                "pair_scenarios": 0, "institutes_retained": 0,
+            })
             continue
 
-        nvals = gg["quantidade_entrevistas"].dropna()
-        mvals = gg["margem_mais"].dropna()
-        n = float(nvals.median()) if not nvals.empty else np.nan
-        moe = float(mvals.median()) if not mvals.empty else np.nan
-        neff = _effective_n(n, moe, default_n, design_effect)
-        pair_ilr = math.log(ref_pct / opp_pct) / math.sqrt(2.0)
-        # First Helmert-balance sampling variance under the multinomial delta method.
-        sampling_var = 0.5 * (1.0 / ref_pct + 1.0 / opp_pct) / neff
-        vote_type = " ".join(sorted({_norm_text(x) for x in gg["tipo_voto"].dropna().astype(str)}))
-        valid_flag = int("VALID" in vote_type)
-        rows.append({
-            "election_year": year,
-            "election_date": pd.Timestamp(rr.election_date).date().isoformat(),
-            "poll_date": gg["data"].max().date().isoformat(),
-            "days_before": days_before,
-            "poll_id": str(poll_id),
-            "scenario_id": str(scenario_id),
-            "pollster": str(gg["pollster_canonical"].iloc[0]),
-            "pollster_raw": str(gg["instituto"].iloc[0]),
-            "vote_type": vote_type,
-            "published_valid": bool(valid_flag),
-            "candidate_mass_pct": candidate_mass,
-            "n_reported": n,
-            "moe_reported": moe,
-            "n_eff": neff,
-            "reference_candidate": str(rr.reference_candidate),
-            "opponent_candidate": str(rr.opponent_candidate),
-            "reference_poll_valid_pct": 100.0 * ref_pct,
-            "opponent_poll_valid_pct": 100.0 * opp_pct,
-            "poll_margin_pp": 100.0 * (ref_pct - opp_pct),
-            "result_reference_share": float(rr.reference_share),
-            "result_opponent_share": float(rr.opponent_share),
-            "result_other_share": float(max(0.0, 1.0 - rr.reference_share - rr.opponent_share)),
-            "result_margin_pp": float(rr.result_margin_pp),
-            "margin_error_pp": 100.0 * (ref_pct - opp_pct) - float(rr.result_margin_pp),
-            "pair_ilr_poll": pair_ilr,
-            "pair_ilr_result": float(rr.result_pair_ilr),
-            "pair_ilr_error": pair_ilr - float(rr.result_pair_ilr),
-            "sampling_var_ilr": sampling_var,
-            # deterministic scenario preference: published valid > mass closest to 100 > larger neff
-            "_scenario_score_valid": valid_flag,
-            "_scenario_score_mass": -abs(candidate_mass - 100.0),
-            "_scenario_score_neff": neff,
+        # Deterministic scenario selection per poll: prefer published valid-vote
+        # scenario, then the scenario with the broadest candidate support and
+        # greatest coherent candidate mass; tie-break by scenario id.
+        cand = cand.sort_values(
+            ["poll_id", "prefer_valid", "n_candidate_rows", "candidate_mass_pct", "scenario_id"],
+            ascending=[True, False, False, False, True],
+            kind="stable",
+        ).drop_duplicates("poll_id", keep="first")
+
+        # One latest poll per institute avoids treating tracking releases as
+        # independent evidence for a common election-level error.
+        cand = cand.sort_values(
+            ["pollster", "poll_date", "n_eff", "poll_id"],
+            ascending=[True, False, False, True],
+            kind="stable",
+        ).drop_duplicates("pollster", keep="first")
+
+        rows.extend(cand.to_dict("records"))
+        audit.append({
+            "election_year": year, "window_days": int(window_days),
+            "rows_in_window": initial_rows, "polls_in_window": initial_polls,
+            "pair_scenarios": int(len(candidates)),
+            "institutes_retained": int(cand["pollster"].nunique()),
         })
 
-    if not rows:
-        raise RuntimeError("No defensible historical poll scenarios after filtering")
-    x = pd.DataFrame(rows)
-
-    # One scenario per poll.
-    x = x.sort_values(
-        ["election_year", "poll_id", "_scenario_score_valid", "_scenario_score_mass", "_scenario_score_neff"],
-        ascending=[True, True, False, False, False],
-    ).drop_duplicates(["election_year", "poll_id"], keep="first")
-
-    # One final poll per institute/election to avoid pseudo-replication from trackers.
-    x["poll_date_ts"] = pd.to_datetime(x["poll_date"])
-    x = x.sort_values(
-        ["election_year", "pollster", "poll_date_ts", "published_valid", "n_eff"],
-        ascending=[True, True, True, True, True],
-    ).drop_duplicates(["election_year", "pollster"], keep="last")
-    x = x.sort_values(["election_year", "pollster"]).reset_index(drop=True)
-    return x.drop(columns=[c for c in x.columns if c.startswith("_scenario_")] + ["poll_date_ts"])
+    out = pd.DataFrame(rows)
+    if not out.empty:
+        out = out.drop(columns=["prefer_valid"], errors="ignore").sort_values(
+            ["window_days", "election_year", "pollster"]
+        ).reset_index(drop=True)
+    return out, pd.DataFrame(audit)
 
 
 @dataclass
-class HistoricalErrorFit:
+class HistoricalFit:
     free_mean: bool
     mu: float
-    mu_var: float
-    election_sd: float
-    house_sd: float
-    poll_sd: float
+    var_mu: float
+    tau_e: float
+    tau_h: float
+    tau_p: float
     nll: float
-    data: pd.DataFrame
+    years: np.ndarray
+    pollsters: np.ndarray
+    y: np.ndarray
+    sampling_var: np.ndarray
     V: np.ndarray
-    chol_V: tuple[np.ndarray, bool]
+    chol: tuple[np.ndarray, bool]
     residual: np.ndarray
-    X: np.ndarray
-    Vinv_X: np.ndarray | None
-    XtVinvX_inv: np.ndarray | None
+    Vinv_ones: np.ndarray | None
 
 
-def _covariance(data: pd.DataFrame, election_sd: float, house_sd: float, poll_sd: float) -> np.ndarray:
-    e = data["election_year"].astype(str).to_numpy()
-    h = data["pollster"].astype(str).to_numpy()
-    s = pd.to_numeric(data["sampling_var_ilr"], errors="raise").to_numpy(dtype=float)
-    v = (e[:, None] == e[None, :]).astype(float) * election_sd**2
-    v += (h[:, None] == h[None, :]).astype(float) * house_sd**2
-    v[np.diag_indices_from(v)] += s + poll_sd**2 + 1e-10
-    return (v + v.T) / 2.0
+def _covariance(years: np.ndarray, pollsters: np.ndarray, sampling_var: np.ndarray,
+                tau_e: float, tau_h: float, tau_p: float) -> np.ndarray:
+    n = len(years)
+    V = np.diag(np.asarray(sampling_var, float) + float(tau_p) ** 2)
+    V += (years[:, None] == years[None, :]).astype(float) * float(tau_e) ** 2
+    V += (pollsters[:, None] == pollsters[None, :]).astype(float) * float(tau_h) ** 2
+    V = (V + V.T) / 2.0
+    V.flat[:: n + 1] += 1e-10
+    return V
 
 
-def _objective(log_scales: np.ndarray, data: pd.DataFrame, free_mean: bool, details: bool = False):
-    scales = np.exp(np.asarray(log_scales, dtype=float))
-    if len(scales) != 3:
-        raise ValueError("Expected election, house and poll scales")
-    y = pd.to_numeric(data["pair_ilr_error"], errors="raise").to_numpy(dtype=float)
+def _profile_nll(log_scales: np.ndarray, y: np.ndarray, years: np.ndarray, pollsters: np.ndarray,
+                 sampling_var: np.ndarray, free_mean: bool, details: bool = False):
+    tau_e, tau_h, tau_p = np.exp(np.asarray(log_scales, float))
     try:
-        V = _covariance(data, *scales)
+        V = _covariance(years, pollsters, sampling_var, tau_e, tau_h, tau_p)
         cf = cho_factor(V, lower=True, check_finite=False)
         Vinv_y = cho_solve(cf, y, check_finite=False)
         logdetV = 2.0 * float(np.log(np.diag(cf[0])).sum())
         if free_mean:
-            X = np.ones((len(y), 1), dtype=float)
-            Vinv_X = cho_solve(cf, X, check_finite=False)
-            B = X.T @ Vinv_X
-            B_inv = np.linalg.inv(B)
-            beta = B_inv @ (X.T @ Vinv_y)
-            mu = float(beta[0])
+            one = np.ones(len(y), float)
+            Vinv_one = cho_solve(cf, one, check_finite=False)
+            B = float(one @ Vinv_one)
+            if not (B > 0):
+                raise FloatingPointError
+            mu = float((one @ Vinv_y) / B)
             residual = y - mu
             quad = float(residual @ cho_solve(cf, residual, check_finite=False))
-            logdetB = float(np.log(B[0, 0]))
-            dof = max(len(y) - 1, 1)
-            nll = 0.5 * (logdetV + logdetB + quad + dof * np.log(2.0 * np.pi))
+            nll = 0.5 * (logdetV + math.log(B) + quad + (len(y) - 1) * math.log(2 * math.pi))
+            var_mu = 1.0 / B
         else:
-            X = np.zeros((len(y), 0), dtype=float)
-            Vinv_X = None
-            B_inv = None
+            Vinv_one = None
             mu = 0.0
+            var_mu = 0.0
             residual = y
             quad = float(y @ Vinv_y)
-            nll = 0.5 * (logdetV + quad + len(y) * np.log(2.0 * np.pi))
+            nll = 0.5 * (logdetV + quad + len(y) * math.log(2 * math.pi))
         if not np.isfinite(nll):
             raise FloatingPointError
-        if not details:
-            return nll
-        mu_var = float(B_inv[0, 0]) if free_mean else 0.0
-        return nll, V, cf, residual, X, Vinv_X, B_inv, mu, mu_var, scales
+        if details:
+            return nll, V, cf, mu, var_mu, residual, Vinv_one, tau_e, tau_h, tau_p
+        return nll
     except (np.linalg.LinAlgError, FloatingPointError, ValueError):
         return None if details else 1e100
 
 
-def fit_historical_error(data: pd.DataFrame, free_mean: bool = True, maxiter: int = 300) -> HistoricalErrorFit:
-    if len(data) < 6 or data["election_year"].nunique() < 2:
-        raise ValueError("Need multiple elections and at least six poll observations")
-    starts = [
-        [0.04, 0.03, 0.02],
-        [0.08, 0.04, 0.04],
-        [0.02, 0.08, 0.02],
-        [0.12, 0.02, 0.06],
-    ]
+def fit_historical_model(df: pd.DataFrame, free_mean: bool = True) -> HistoricalFit:
+    if len(df) < 6 or df["election_year"].nunique() < 2:
+        raise ValueError("historical model needs at least two elections and six polls")
+    y = pd.to_numeric(df["pair_error_ilr"], errors="raise").to_numpy(float)
+    years = pd.to_numeric(df["election_year"], errors="raise").to_numpy(int)
+    pollsters = df["pollster"].astype(str).map(_norm_text).to_numpy()
+    sampling_var = pd.to_numeric(df["sampling_var_ilr"], errors="raise").to_numpy(float)
+    if np.any(~np.isfinite(y)) or np.any(~np.isfinite(sampling_var)) or np.any(sampling_var <= 0):
+        raise ValueError("invalid historical errors or sampling variances")
+
+    starts = np.array([
+        [0.03, 0.03, 0.03],
+        [0.08, 0.05, 0.05],
+        [0.15, 0.08, 0.08],
+        [0.30, 0.05, 0.10],
+    ])
+    bounds = [(-8.0, 0.5)] * 3
     best = None
     for st in starts:
         res = minimize(
-            _objective,
-            np.log(st),
-            args=(data, free_mean, False),
-            method="L-BFGS-B",
-            bounds=[(-8.0, 0.0)] * 3,
-            options={"maxiter": int(maxiter), "ftol": 1e-11},
+            _profile_nll, np.log(st),
+            args=(y, years, pollsters, sampling_var, free_mean, False),
+            method="L-BFGS-B", bounds=bounds,
+            options={"maxiter": 500, "ftol": 1e-11},
         )
         if np.isfinite(res.fun) and (best is None or res.fun < best.fun):
             best = res
     if best is None:
-        raise RuntimeError("Historical error variance-component optimization failed")
-    det = _objective(best.x, data, free_mean, True)
+        raise RuntimeError("historical variance-component optimization failed")
+    det = _profile_nll(best.x, y, years, pollsters, sampling_var, free_mean, True)
     if det is None:
-        raise RuntimeError("Could not reconstruct historical error fit")
-    nll, V, cf, residual, X, Vinv_X, B_inv, mu, mu_var, scales = det
-    return HistoricalErrorFit(
-        free_mean=free_mean,
-        mu=float(mu), mu_var=float(mu_var),
-        election_sd=float(scales[0]), house_sd=float(scales[1]), poll_sd=float(scales[2]),
-        nll=float(nll), data=data.reset_index(drop=True).copy(), V=V, chol_V=cf,
-        residual=residual, X=X, Vinv_X=Vinv_X, XtVinvX_inv=B_inv,
+        raise RuntimeError("could not reconstruct historical fit")
+    nll, V, cf, mu, var_mu, residual, Vinv_one, tau_e, tau_h, tau_p = det
+    return HistoricalFit(
+        free_mean=free_mean, mu=float(mu), var_mu=float(var_mu), tau_e=float(tau_e),
+        tau_h=float(tau_h), tau_p=float(tau_p), nll=float(nll), years=years,
+        pollsters=pollsters, y=y, sampling_var=sampling_var, V=V, chol=cf,
+        residual=residual, Vinv_ones=Vinv_one,
     )
 
 
-def _group_posterior(fit: HistoricalErrorFit, column: str, label: object, sd: float, include_fixed: bool) -> tuple[float, float]:
-    n = len(fit.data)
-    k = (fit.data[column].astype(str).to_numpy() == str(label)).astype(float) * sd**2
-    Vinv_r = cho_solve(fit.chol_V, fit.residual, check_finite=False)
-    mean = (fit.mu if include_fixed else 0.0) + float(k @ Vinv_r)
-    Vinv_k = cho_solve(fit.chol_V, k, check_finite=False)
-    var = sd**2 - float(k @ Vinv_k)
-    if fit.free_mean and fit.Vinv_X is not None and fit.XtVinvX_inv is not None:
-        x0 = 1.0 if include_fixed else 0.0
-        d = x0 - float(k @ fit.Vinv_X[:, 0])
-        var += d * d * float(fit.XtVinvX_inv[0, 0])
+def _random_effect_posterior(fit: HistoricalFit, group: str, value: object) -> tuple[float, float]:
+    if group == "election":
+        mask = fit.years == int(value)
+        tau2 = fit.tau_e ** 2
+    elif group == "pollster":
+        mask = fit.pollsters == _norm_text(value)
+        tau2 = fit.tau_h ** 2
+    else:
+        raise ValueError(group)
+    if not mask.any():
+        return 0.0, tau2
+    k = tau2 * mask.astype(float)
+    Vinv_r = cho_solve(fit.chol, fit.residual, check_finite=False)
+    mean = float(k @ Vinv_r)
+    Vinv_k = cho_solve(fit.chol, k, check_finite=False)
+    var = float(tau2 - k @ Vinv_k)
+    if fit.free_mean and fit.Vinv_ones is not None:
+        # Uncertainty in the fixed intercept propagates into random-effect prediction.
+        one = np.ones(len(k), float)
+        d = float(0.0 - k @ fit.Vinv_ones)
+        var += d * d * fit.var_mu
     return mean, max(var, 1e-12)
 
 
-def election_effects(fit: HistoricalErrorFit) -> pd.DataFrame:
+def election_effects(fit: HistoricalFit) -> pd.DataFrame:
     rows = []
-    for e in sorted(fit.data["election_year"].unique()):
-        mean, var = _group_posterior(fit, "election_year", e, fit.election_sd, include_fixed=True)
+    for year in sorted(set(fit.years)):
+        b, vb = _random_effect_posterior(fit, "election", year)
+        common = fit.mu + b
+        vcommon = fit.var_mu + vb
         rows.append({
-            "election_year": int(e),
-            "posterior_common_error_ilr": mean,
-            "posterior_common_error_ilr_sd": math.sqrt(var),
-            "n_pollsters": int(fit.data.loc[fit.data["election_year"].eq(e), "pollster"].nunique()),
+            "election_year": int(year),
+            "mu_ilr": fit.mu,
+            "election_re_ilr": b,
+            "common_error_ilr": common,
+            "common_error_sd_ilr": math.sqrt(max(vcommon, 0.0)),
         })
     return pd.DataFrame(rows)
 
 
-def house_effects(fit: HistoricalErrorFit) -> pd.DataFrame:
-    rows = []
-    for h in sorted(fit.data["pollster"].astype(str).unique()):
-        mean, var = _group_posterior(fit, "pollster", h, fit.house_sd, include_fixed=False)
-        rows.append({
-            "pollster": h,
-            "posterior_house_effect_ilr": mean,
-            "posterior_house_effect_ilr_sd": math.sqrt(var),
-            "n_elections": int(fit.data.loc[fit.data["pollster"].astype(str).eq(h), "election_year"].nunique()),
-        })
-    return pd.DataFrame(rows)
+def _heldout_consensus(hold: pd.DataFrame, fit: HistoricalFit) -> tuple[float, float, int]:
+    adjusted = []
+    variances = []
+    for r in hold.itertuples(index=False):
+        h, vh = _random_effect_posterior(fit, "pollster", r.pollster)
+        adjusted.append(float(r.pair_error_ilr) - h)
+        variances.append(float(r.sampling_var_ilr) + fit.tau_p ** 2 + vh)
+    w = 1.0 / np.maximum(np.asarray(variances, float), 1e-12)
+    vals = np.asarray(adjusted, float)
+    mean = float(np.sum(w * vals) / np.sum(w))
+    var = float(1.0 / np.sum(w))
+    return mean, var, len(vals)
 
 
-def predictive_new_election(fit: HistoricalErrorFit) -> tuple[float, float]:
-    """Predict poll-minus-result common pair error for a new election."""
-    var = fit.election_sd**2 + (fit.mu_var if fit.free_mean else 0.0)
-    return fit.mu, math.sqrt(max(var, 1e-12))
+def _baseline_ilr_sd_from_result(row: pd.Series, target_pp: float = 2.5) -> float:
+    """Approximate current external-prior scale in the first ILR coordinate.
 
-
-def loo_validate(data: pd.DataFrame, free_mean: bool = True) -> pd.DataFrame:
-    """Leave one whole election out.
-
-    The held-out target is the inverse-variance mean poll error after subtracting
-    house effects learned only from the other elections. Its measurement variance
-    includes sampling noise, residual poll dispersion and uncertainty in the
-    historical house effect.
+    Use a three-part composition (reference, opponent, all other valid votes) and
+    the same isotropic-ILR calibration principle as the production model.
     """
+    p1 = float(row["result_ref_share"])
+    p2 = float(row["result_opp_share"])
+    p3 = max(1.0 - p1 - p2, 1e-9)
+    p = np.array([p1, p2, p3], float)
+    p /= p.sum()
+    H = np.array([
+        [1 / math.sqrt(2), 1 / math.sqrt(6)],
+        [-1 / math.sqrt(2), 1 / math.sqrt(6)],
+        [0.0, -2 / math.sqrt(6)],
+    ])
+    J = (np.diag(p) - np.outer(p, p)) @ H
+    rms = float(np.sqrt(np.mean(np.sum(J[:2, :] ** 2, axis=1))))
+    return (float(target_pp) / 100.0) / max(rms, 1e-9)
+
+
+def loo_by_election(df: pd.DataFrame, results: pd.DataFrame, free_mean: bool,
+                    baseline_pp: float = 2.5) -> pd.DataFrame:
     rows = []
-    for e in sorted(data["election_year"].unique()):
-        train = data[data["election_year"].ne(e)].copy()
-        test = data[data["election_year"].eq(e)].copy()
-        fit = fit_historical_error(train, free_mean=free_mean)
-        htab = house_effects(fit).set_index("pollster")
-        adjusted = []
-        variances = []
-        for r in test.itertuples(index=False):
-            h = str(r.pollster)
-            if h in htab.index:
-                hm = float(htab.loc[h, "posterior_house_effect_ilr"])
-                hv = float(htab.loc[h, "posterior_house_effect_ilr_sd"]) ** 2
-            else:
-                hm = 0.0
-                hv = fit.house_sd**2
-            adjusted.append(float(r.pair_ilr_error) - hm)
-            variances.append(float(r.sampling_var_ilr) + fit.poll_sd**2 + hv)
-        adjusted = np.asarray(adjusted)
-        variances = np.asarray(variances)
-        w = 1.0 / np.maximum(variances, 1e-12)
-        observed = float(np.sum(w * adjusted) / np.sum(w))
-        observed_var = float(1.0 / np.sum(w))
-        pred_mean, pred_sd_latent = predictive_new_election(fit)
-        pred_var_obs = pred_sd_latent**2 + observed_var
-        z = (observed - pred_mean) / math.sqrt(pred_var_obs)
+    for year in sorted(df["election_year"].unique()):
+        train = df[df["election_year"].ne(year)].copy()
+        hold = df[df["election_year"].eq(year)].copy()
+        if train["election_year"].nunique() < 2 or hold.empty:
+            continue
+        fit = fit_historical_model(train, free_mean=free_mean)
+        obs, obs_var, n = _heldout_consensus(hold, fit)
+        pred_mean = fit.mu
+        pred_var = fit.tau_e ** 2 + fit.var_mu + obs_var
+        pred_sd = math.sqrt(max(pred_var, 1e-12))
+        z = (obs - pred_mean) / pred_sd
+        logscore = float(norm.logpdf(obs, loc=pred_mean, scale=pred_sd))
+
+        rr = results[results["election_year"].eq(year)].iloc[0]
+        base_sd0 = _baseline_ilr_sd_from_result(rr, baseline_pp)
+        base_sd = math.sqrt(base_sd0 ** 2 + obs_var)
+        base_logscore = float(norm.logpdf(obs, loc=0.0, scale=base_sd))
+
         rows.append({
-            "heldout_election": int(e),
-            "n_pollsters": int(test["pollster"].nunique()),
-            "observed_common_error_ilr": observed,
-            "observed_se_ilr": math.sqrt(observed_var),
+            "heldout_year": int(year),
+            "model": "free_mean" if free_mean else "zero_mean",
+            "n_holdout_pollsters": int(n),
+            "observed_common_error_ilr": obs,
+            "observed_consensus_sd_ilr": math.sqrt(obs_var),
             "pred_mean_ilr": pred_mean,
-            "pred_sd_latent_ilr": pred_sd_latent,
-            "pred_sd_observed_ilr": math.sqrt(pred_var_obs),
-            "z_score": z,
-            "log_score": float(norm.logpdf(observed, loc=pred_mean, scale=math.sqrt(pred_var_obs))),
-            "covered_80": bool(abs(z) <= norm.ppf(0.90)),
-            "covered_95": bool(abs(z) <= norm.ppf(0.975)),
-            "free_mean": bool(free_mean),
+            "pred_sd_ilr": pred_sd,
+            "z_error": z,
+            "covered_80": abs(z) <= norm.ppf(0.90),
+            "covered_95": abs(z) <= norm.ppf(0.975),
+            "log_score": logscore,
+            "baseline_2p5_pred_sd_ilr": base_sd,
+            "baseline_2p5_log_score": base_logscore,
+            "delta_log_score_vs_2p5": logscore - base_logscore,
+            "train_tau_e_ilr": fit.tau_e,
+            "train_tau_h_ilr": fit.tau_h,
+            "train_tau_p_ilr": fit.tau_p,
+            "train_mu_ilr": fit.mu,
         })
     return pd.DataFrame(rows)
 
 
-def jackknife_parameters(data: pd.DataFrame, free_mean: bool = True) -> pd.DataFrame:
-    """Refit after deleting each entire election and report parameter stability."""
+def jackknife(df: pd.DataFrame, free_mean: bool = True) -> pd.DataFrame:
     rows = []
-    for e in sorted(data["election_year"].unique()):
-        train = data[data["election_year"].ne(e)].copy()
-        fit = fit_historical_error(train, free_mean=free_mean)
-        pred_mean, pred_sd = predictive_new_election(fit)
+    for year in sorted(df["election_year"].unique()):
+        train = df[df["election_year"].ne(year)].copy()
+        fit = fit_historical_model(train, free_mean=free_mean)
         rows.append({
-            "omitted_election": int(e),
-            "free_mean": bool(free_mean),
-            "n_elections_train": int(train["election_year"].nunique()),
-            "n_observations_train": int(len(train)),
-            "mu_pair_error_ilr": fit.mu,
-            "mu_pair_error_ilr_se": math.sqrt(max(fit.mu_var, 0.0)),
-            "election_sd_ilr": fit.election_sd,
-            "house_sd_ilr": fit.house_sd,
-            "poll_sd_ilr": fit.poll_sd,
-            "predictive_new_election_error_mean_ilr": pred_mean,
-            "predictive_new_election_error_sd_ilr": pred_sd,
-            "nll": fit.nll,
+            "excluded_year": int(year),
+            "model": "free_mean" if free_mean else "zero_mean",
+            "mu_ilr": fit.mu,
+            "mu_sd_ilr": math.sqrt(fit.var_mu),
+            "tau_e_ilr": fit.tau_e,
+            "tau_h_ilr": fit.tau_h,
+            "tau_p_ilr": fit.tau_p,
         })
     return pd.DataFrame(rows)
 
 
-def summarize_fit(fit: HistoricalErrorFit, window_days: int) -> pd.DataFrame:
-    pred_mean, pred_sd = predictive_new_election(fit)
-    return pd.DataFrame([{
-        "window_days": int(window_days),
-        "free_mean": bool(fit.free_mean),
-        "n_elections": int(fit.data["election_year"].nunique()),
-        "n_pollsters": int(fit.data["pollster"].nunique()),
-        "n_observations": int(len(fit.data)),
-        "mu_pair_error_ilr": fit.mu,
-        "mu_pair_error_ilr_se": math.sqrt(max(fit.mu_var, 0.0)),
-        "election_sd_ilr": fit.election_sd,
-        "house_sd_ilr": fit.house_sd,
-        "poll_sd_ilr": fit.poll_sd,
-        "predictive_new_election_error_mean_ilr": pred_mean,
-        "predictive_new_election_error_sd_ilr": pred_sd,
-        "nll": fit.nll,
-    }])
+def robust_location_sensitivity(effects: pd.DataFrame) -> pd.DataFrame:
+    """Approximate robust second-stage sensitivity across election effects.
+
+    This is deliberately diagnostic: six elections do not justify wiring a
+    Student-t random-effect distribution into production. Measurement SDs are
+    folded into the scale as sqrt(tau^2 + se_e^2).
+    """
+    x = effects["common_error_ilr"].to_numpy(float)
+    se = effects["common_error_sd_ilr"].to_numpy(float)
+    rows = []
+    for dfree in [3, 4, 5, np.inf]:
+        def nll(par):
+            mu = float(par[0])
+            tau = math.exp(float(par[1]))
+            scale = np.sqrt(tau * tau + se * se)
+            z = (x - mu) / scale
+            if np.isinf(dfree):
+                ll = norm.logpdf(z) - np.log(scale)
+            else:
+                ll = student_t.logpdf(z, df=dfree) - np.log(scale)
+            return -float(np.sum(ll))
+        x0 = np.array([float(np.median(x)), math.log(max(float(np.std(x)), 0.03))])
+        res = minimize(nll, x0, method="L-BFGS-B", bounds=[(-1.5, 1.5), (-8.0, 0.5)])
+        mu = float(res.x[0])
+        tau = math.exp(float(res.x[1]))
+        rows.append({
+            "distribution": "Normal" if np.isinf(dfree) else f"Student-t({int(dfree)})",
+            "df": None if np.isinf(dfree) else int(dfree),
+            "mu_ilr": mu,
+            "tau_ilr": tau,
+            "nll": float(res.fun),
+        })
+    return pd.DataFrame(rows)
 
 
-def run_calibration(
-    raw: pd.DataFrame,
-    results: pd.DataFrame,
-    aliases: dict[str, str],
-    windows: list[int],
-    output_dir: str | Path,
-) -> None:
-    out = Path(output_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    all_summary = []
-    all_loo = []
-    all_jackknife = []
-    for w in windows:
-        p = prepare_historical_final_polls(raw, results, window_days=w, pollster_aliases=aliases)
-        p.to_csv(out / f"historical_final_polls_w{w}.csv", index=False)
-        for free_mean in [False, True]:
-            fit = fit_historical_error(p, free_mean=free_mean)
-            tag = "free_mean" if free_mean else "zero_mean"
-            election_effects(fit).to_csv(out / f"historical_election_effects_w{w}_{tag}.csv", index=False)
-            house_effects(fit).to_csv(out / f"historical_house_effects_w{w}_{tag}.csv", index=False)
-            all_summary.append(summarize_fit(fit, w))
-            loo = loo_validate(p, free_mean=free_mean)
-            loo["window_days"] = w
-            all_loo.append(loo)
-            jk = jackknife_parameters(p, free_mean=free_mean)
-            jk["window_days"] = w
-            all_jackknife.append(jk)
-    pd.concat(all_summary, ignore_index=True).to_csv(out / "historical_error_fit_summary.csv", index=False)
-    pd.concat(all_jackknife, ignore_index=True).to_csv(out / "historical_error_jackknife.csv", index=False)
-    loo = pd.concat(all_loo, ignore_index=True)
-    loo.to_csv(out / "historical_error_loo.csv", index=False)
-    metrics = (
-        loo.groupby(["window_days", "free_mean"], as_index=False)
-        .agg(
-            mean_log_score=("log_score", "mean"),
-            total_log_score=("log_score", "sum"),
-            coverage_80=("covered_80", "mean"),
-            coverage_95=("covered_95", "mean"),
-            mean_abs_z=("z_score", lambda x: float(np.mean(np.abs(x)))),
-        )
-    )
-    metrics.to_csv(out / "historical_error_loo_metrics.csv", index=False)
+def _pair_margin_pp_from_ilr_shift(row: pd.Series, delta_z: float) -> float:
+    """Translate a small first-balance ILR error into error in p_ref-p_opp (p.p.)."""
+    p1 = float(row["result_ref_share"])
+    p2 = float(row["result_opp_share"])
+    # Shift only the first Helmert coordinate while holding the aggregate rest fixed.
+    z0 = pair_ilr(p1, p2)
+    ratio = math.exp(math.sqrt(2.0) * (z0 + float(delta_z)))
+    pair_mass = p1 + p2
+    q2 = pair_mass / (1.0 + ratio)
+    q1 = pair_mass - q2
+    return 100.0 * ((q1 - q2) - (p1 - p2))
+
+
+def summarize_window(df: pd.DataFrame, results: pd.DataFrame, window_days: int) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    x = df[df["window_days"].eq(window_days)].copy()
+    free = fit_historical_model(x, free_mean=True)
+    zero = fit_historical_model(x, free_mean=False)
+
+    fits = []
+    rr_last = results.iloc[-1]
+    for label, fit in [("free_mean", free), ("zero_mean", zero)]:
+        fits.append({
+            "window_days": int(window_days), "model": label, "n_polls": len(x),
+            "n_elections": x["election_year"].nunique(), "n_pollsters": x["pollster"].nunique(),
+            "mu_ilr": fit.mu, "mu_sd_ilr": math.sqrt(fit.var_mu),
+            "tau_e_ilr": fit.tau_e, "tau_h_ilr": fit.tau_h, "tau_p_ilr": fit.tau_p,
+            "reml_nll": fit.nll,
+            "approx_mu_margin_pp_at_2022": _pair_margin_pp_from_ilr_shift(rr_last, fit.mu),
+            "approx_tau_e_margin_pp_at_2022": abs(_pair_margin_pp_from_ilr_shift(rr_last, fit.tau_e)),
+        })
+    fits_df = pd.DataFrame(fits)
+
+    eff = election_effects(free)
+    eff["window_days"] = int(window_days)
+    eff = eff.merge(results[["election_year", "result_ref_share", "result_opp_share"]], on="election_year", how="left")
+    eff["common_error_margin_pp"] = eff.apply(lambda r: _pair_margin_pp_from_ilr_shift(r, r.common_error_ilr), axis=1)
+
+    loo = pd.concat([
+        loo_by_election(x, results, free_mean=True),
+        loo_by_election(x, results, free_mean=False),
+    ], ignore_index=True)
+    loo["window_days"] = int(window_days)
+
+    jk = jackknife(x, free_mean=True)
+    jk["window_days"] = int(window_days)
+    return fits_df, eff, loo, jk
+
+
+def write_report(out: Path, fits: pd.DataFrame, effects: pd.DataFrame, loo: pd.DataFrame,
+                 jack: pd.DataFrame, robust: pd.DataFrame, audit: pd.DataFrame) -> None:
+    def md(df: pd.DataFrame, cols: list[str]) -> str:
+        y = df[cols].copy()
+        for c in y.select_dtypes(include=["float"]).columns:
+            y[c] = y[c].map(lambda v: f"{v:.4f}" if pd.notna(v) else "")
+        return y.to_markdown(index=False)
+
+    primary = fits[fits["window_days"].eq(7)]
+    loo7 = loo[loo["window_days"].eq(7)]
+    jk7 = jack[jack["window_days"].eq(7)]
+    eff7 = effects[effects["window_days"].eq(7)]
+    lines = [
+        "# Historical common polling error — experimental results", "",
+        "> Experimental branch only. These numbers are not wired into the published nowcast.", "",
+        "## Variance-component fits", "",
+        md(fits, ["window_days", "model", "n_polls", "n_elections", "n_pollsters", "mu_ilr", "tau_e_ilr", "tau_h_ilr", "tau_p_ilr", "approx_mu_margin_pp_at_2022", "approx_tau_e_margin_pp_at_2022"]), "",
+        "## 7-day election effects", "",
+        md(eff7, ["election_year", "common_error_ilr", "common_error_sd_ilr", "common_error_margin_pp"]), "",
+        "## 7-day leave-one-election-out", "",
+        md(loo7, ["heldout_year", "model", "observed_common_error_ilr", "pred_mean_ilr", "pred_sd_ilr", "z_error", "covered_80", "covered_95", "delta_log_score_vs_2p5"]), "",
+        "## 7-day jackknife of the free mean", "",
+        md(jk7, ["excluded_year", "mu_ilr", "mu_sd_ilr", "tau_e_ilr", "tau_h_ilr", "tau_p_ilr"]), "",
+        "## Robust second-stage sensitivity (7-day effects)", "",
+        md(robust, ["distribution", "mu_ilr", "tau_ilr", "nll"]), "",
+        "## Extraction audit", "",
+        md(audit, ["window_days", "election_year", "rows_in_window", "polls_in_window", "pair_scenarios", "institutes_retained"]), "",
+        "## Interpretation guardrails", "",
+        "- A non-zero historical mean is not accepted merely because it fits all six elections.",
+        "- 2022 influence is assessed by the `excluded_year=2022` jackknife row and the robust sensitivity table.",
+        "- No time decay is used in this experiment, so 2022 does not receive extra weight for recency.",
+        "- The current 2.5 p.p. prior remains production behavior until whole-election LOO supports a replacement.",
+    ]
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Brazil-specific common presidential polling-error calibration")
-    ap.add_argument("--polls-file", default=None, help="Local Poder360/Base dos Dados CSV(.gz); omit to use public one-click URL")
+    ap = argparse.ArgumentParser()
     ap.add_argument("--results", default="data/presidential_first_round_results.csv")
-    ap.add_argument("--pollster-aliases", default="data/pollster_aliases.csv")
+    ap.add_argument("--polls", default="data/cache/br_poder360_pesquisas_microdados.csv.gz")
+    ap.add_argument("--polls-url", default=BASE_DOS_DADOS_URL)
+    ap.add_argument("--out", default="output_historical_error")
     ap.add_argument("--windows", default="3,7,14")
-    ap.add_argument("--output-dir", default="output_historical_error")
+    ap.add_argument("--no-download", action="store_true")
     args = ap.parse_args()
+
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
     results = load_results(args.results)
-    aliases = load_pollster_aliases(args.pollster_aliases)
-    raw = load_poder360_history(args.polls_file)
-    windows = [int(x) for x in str(args.windows).split(",") if str(x).strip()]
-    run_calibration(raw, results, aliases, windows, args.output_dir)
+    poll_path = Path(args.polls)
+    if not poll_path.exists():
+        if args.no_download:
+            raise FileNotFoundError(poll_path)
+        download_snapshot(args.polls_url, poll_path)
+    polls = read_poll_snapshot(poll_path)
+
+    windows = tuple(int(x.strip()) for x in args.windows.split(",") if x.strip())
+    all_errors, audits = [], []
+    for w in windows:
+        e, a = extract_window_errors(polls, results, w)
+        all_errors.append(e)
+        audits.append(a)
+    errors = pd.concat(all_errors, ignore_index=True)
+    audit = pd.concat(audits, ignore_index=True)
+    if errors.empty:
+        raise RuntimeError("historical extraction produced no usable polls")
+
+    errors.to_csv(out / "historical_poll_errors.csv", index=False)
+    audit.to_csv(out / "historical_extraction_audit.csv", index=False)
+
+    fit_tables, eff_tables, loo_tables, jk_tables = [], [], [], []
+    for w in windows:
+        fw, ew, lw, jw = summarize_window(errors, results, w)
+        fit_tables.append(fw); eff_tables.append(ew); loo_tables.append(lw); jk_tables.append(jw)
+    fits = pd.concat(fit_tables, ignore_index=True)
+    effects = pd.concat(eff_tables, ignore_index=True)
+    loo = pd.concat(loo_tables, ignore_index=True)
+    jack = pd.concat(jk_tables, ignore_index=True)
+
+    robust = robust_location_sensitivity(effects[effects["window_days"].eq(7)])
+    robust["window_days"] = 7
+
+    fits.to_csv(out / "historical_fit_summary.csv", index=False)
+    effects.to_csv(out / "historical_election_effects.csv", index=False)
+    loo.to_csv(out / "historical_loo.csv", index=False)
+    jack.to_csv(out / "historical_jackknife.csv", index=False)
+    robust.to_csv(out / "historical_robust_sensitivity.csv", index=False)
+    write_report(out / "historical_error_report.md", fits, effects, loo, jack, robust, audit)
+
+    manifest = {
+        "source": args.polls_url,
+        "windows": list(windows),
+        "years": sorted(int(x) for x in errors["election_year"].unique()),
+        "primary_window_days": 7,
+        "production_nowcast_modified": False,
+        "time_decay": False,
+        "robust_student_t": "diagnostic only",
+    }
+    (out / "historical_error_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+    print(fits.to_string(index=False))
+    print("\n7-day election effects:")
+    print(effects[effects["window_days"].eq(7)].to_string(index=False))
+    print("\n7-day LOO:")
+    print(loo[loo["window_days"].eq(7)].to_string(index=False))
 
 
 if __name__ == "__main__":
