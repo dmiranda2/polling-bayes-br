@@ -1,4 +1,4 @@
-name: Historical polling error experiment
+name: Historical error experiment
 
 on:
   push:
@@ -7,9 +7,13 @@ on:
       - 'src/historical_error.py'
       - 'tests/test_historical_error.py'
       - 'data/presidential_first_round_results.csv'
-      - 'data/pollster_aliases.csv'
+      - 'HISTORICAL_ERROR_DESIGN.md'
+      - 'requirements.txt'
       - '.github/workflows/historical-error.yml'
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   calibrate:
@@ -17,28 +21,29 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: v1-historical-error
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: 'pip'
+          cache: pip
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest
-      - name: Unit tests
-        env:
-          PYTHONPATH: src
-        run: pytest -q tests/test_historical_error.py
-      - name: Run Brazil historical calibration
-        run: python src/historical_error.py --windows 3,7,14 --output-dir output_historical_error
-      - name: Show compact diagnostics
         run: |
-          echo '=== FIT SUMMARY ==='
-          cat output_historical_error/historical_error_fit_summary.csv
-          echo '=== LOO METRICS ==='
-          cat output_historical_error/historical_error_loo_metrics.csv
-          echo '=== JACKKNIFE ==='
-          cat output_historical_error/historical_error_jackknife.csv
-      - uses: actions/upload-artifact@v4
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install tabulate pytest
+      - name: Run tests
+        run: PYTHONPATH=src pytest -q
+      - name: Run historical calibration
+        run: |
+          python src/historical_error.py \
+            --results data/presidential_first_round_results.csv \
+            --out output_historical_error \
+            --windows 3,7,14
+      - name: Upload diagnostics
+        uses: actions/upload-artifact@v4
         with:
-          name: historical-error-calibration
+          name: historical-error-diagnostics
           path: output_historical_error/
           if-no-files-found: error
+          retention-days: 30
