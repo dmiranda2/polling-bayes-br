@@ -1,88 +1,92 @@
+import math
+from pathlib import Path
+import sys
+
 import numpy as np
 import pandas as pd
 
+sys.path.insert(0, str(Path(__file__).parent))
 from historical_error import (
-    fit_historical_error,
-    jackknife_parameters,
-    loo_validate,
-    prepare_historical_final_polls,
+    pair_ilr,
+    pair_ilr_sampling_var,
+    load_results,
+    extract_window_errors,
+    fit_historical_model,
+    jackknife,
 )
 
 
-def test_prepare_selects_valid_scenario_and_latest_poll():
-    results = pd.DataFrame([{
-        "election_year": 2022,
-        "election_date": pd.Timestamp("2022-10-02"),
-        "reference_candidate": "Lula",
-        "opponent_candidate": "Jair Bolsonaro",
-        "reference_aliases": "Lula",
-        "opponent_aliases": "Bolsonaro|Jair Bolsonaro",
-        "reference_share": .4843,
-        "opponent_share": .4320,
-        "result_pair_ilr": np.log(.4843/.4320)/np.sqrt(2),
-        "result_margin_pp": 5.23,
-    }])
-    rows=[]
-    def add(pid, scen, date, pollster, tipo_voto, vals, n=2000, moe=2.2):
-        for cand,pct in vals.items():
-            rows.append(dict(id_pesquisa=pid,ano=2022,sigla_uf=np.nan,cargo="Presidente",
-                data=date,instituto=pollster,tipo="Estimulada",turno=1,tipo_voto=tipo_voto,
-                id_cenario=scen,nome_candidato=cand,condicao=0,percentual=pct,
-                quantidade_entrevistas=n,margem_mais=moe))
-    add("a","1","2022-09-29","X","Votos Totais",{"Lula":45,"Jair Bolsonaro":40,"Ciro":5})
-    add("a","2","2022-09-29","X","Votos Válidos",{"Lula":50,"Jair Bolsonaro":44,"Ciro":6})
-    add("b","1","2022-10-01","X","Votos Totais",{"Lula":48,"Bolsonaro":43,"Ciro":5})
-    raw=pd.DataFrame(rows)
-    out=prepare_historical_final_polls(raw,results,window_days=7)
-    assert len(out)==1
-    assert out.iloc[0].poll_id=="b"
-    assert abs(out.iloc[0].reference_poll_valid_pct-50.0)<1e-8
-    assert abs(out.iloc[0].opponent_poll_valid_pct-(43/96*100))<1e-8
+def test_pair_ilr_ratio_invariant_to_common_renormalization():
+    z1 = pair_ilr(0.45, 0.40)
+    z2 = pair_ilr(45 / 85, 40 / 85)
+    assert abs(z1 - z2) < 1e-12
 
 
-def test_fit_recovers_signal_on_synthetic_panel():
-    rng=np.random.default_rng(42)
-    elections=np.arange(2002,2026,4)
-    houses=["A","B","C","D","E"]
-    mu=.035; tau_e=.045; tau_h=.025; tau_p=.015
-    e_eff={e:rng.normal(0,tau_e) for e in elections}
-    h_eff={h:rng.normal(0,tau_h) for h in houses}
-    rows=[]
-    for e in elections:
-        for h in houses:
-            sv=.0002
-            y=mu+e_eff[e]+h_eff[h]+rng.normal(0,np.sqrt(sv+tau_p**2))
-            rows.append(dict(election_year=e,pollster=h,pair_ilr_error=y,sampling_var_ilr=sv))
-    d=pd.DataFrame(rows)
-    fit=fit_historical_error(d,free_mean=True)
-    assert abs(fit.mu-mu)<.08
-    assert fit.election_sd>0
-    assert fit.house_sd>0
-    assert fit.poll_sd>0
-    loo=loo_validate(d,free_mean=True)
-    assert len(loo)==len(elections)
-    assert np.isfinite(loo.log_score).all()
+def test_pair_sampling_variance_positive():
+    v = pair_ilr_sampling_var(0.45, 0.40, 2000)
+    assert v > 0
+    assert math.isfinite(v)
 
 
-def test_zero_mean_fit_is_exactly_centered():
-    d=pd.DataFrame({
-        "election_year":[2002,2002,2006,2006,2010,2010],
-        "pollster":["A","B","A","B","A","B"],
-        "pair_ilr_error":[.02,.01,-.01,.0,.03,.01],
-        "sampling_var_ilr":[.001]*6,
-    })
-    fit=fit_historical_error(d,free_mean=False)
-    assert fit.mu==0.0
+def test_extract_window_latest_poll_per_institute(tmp_path):
+    results_path = tmp_path / "results.csv"
+    pd.DataFrame([
+        {
+            "election_year": 2022,
+            "election_date": "2022-10-02",
+            "reference_candidate": "Lula",
+            "reference_party": "PT",
+            "opponent_candidate": "Jair Bolsonaro",
+            "opponent_party": "PL",
+            "reference_votes": 57,
+            "opponent_votes": 51,
+            "total_valid_votes": 118,
+            "reference_aliases": "Lula",
+            "opponent_aliases": "Jair Bolsonaro|Bolsonaro",
+            "source_url": "x",
+        }
+    ]).to_csv(results_path, index=False)
+    results = load_results(results_path)
+    rows = []
+    for date, poll_id, inst, lula, bol in [
+        ("2022-09-28", "a1", "A", 45, 40),
+        ("2022-10-01", "a2", "A", 48, 41),
+        ("2022-09-30", "b1", "B", 47, 42),
+    ]:
+        for cand, pct in [("Lula", lula), ("Jair Bolsonaro", bol), ("Ciro", 8)]:
+            rows.append({
+                "ano": 2022, "cargo": "presidente", "data": date,
+                "instituto": inst, "turno": 1, "nome_candidato": cand,
+                "percentual": pct, "sigla_uf": None, "tipo": "Estimulada",
+                "id_pesquisa": poll_id, "id_cenario": "1", "tipo_voto": "Votos Totais",
+                "quantidade_entrevistas": 2000, "margem_mais": 2.0, "condicao": 0,
+            })
+    polls = pd.DataFrame(rows)
+    out, audit = extract_window_errors(polls, results, 7)
+    assert len(out) == 2
+    assert set(out["poll_id"]) == {"a2", "b1"}
+    assert int(audit.loc[0, "institutes_retained"]) == 2
 
 
-def test_jackknife_omits_one_whole_election():
-    d=pd.DataFrame({
-        "election_year":[2002,2002,2006,2006,2010,2010,2014,2014],
-        "pollster":["A","B"]*4,
-        "pair_ilr_error":[.02,.01,-.01,.0,.03,.01,.04,.02],
-        "sampling_var_ilr":[.001]*8,
-    })
-    out=jackknife_parameters(d,free_mean=True)
-    assert set(out["omitted_election"])=={2002,2006,2010,2014}
-    assert (out["n_elections_train"]==3).all()
-    assert np.isfinite(out["predictive_new_election_error_sd_ilr"]).all()
+def test_fit_recovers_positive_mean_synthetic():
+    rng = np.random.default_rng(123)
+    rows = []
+    pollsters = ["A", "B", "C", "D"]
+    true_mu = 0.08
+    year_effect = {2002: -0.02, 2006: 0.00, 2010: 0.03, 2014: -0.01, 2018: 0.01, 2022: 0.12}
+    house = {"A": 0.02, "B": -0.01, "C": 0.0, "D": -0.005}
+    for year in year_effect:
+        for p in pollsters:
+            rows.append({
+                "election_year": year,
+                "pollster": p,
+                "pair_error_ilr": true_mu + year_effect[year] + house[p] + rng.normal(0, 0.015),
+                "sampling_var_ilr": 0.01**2,
+            })
+    d = pd.DataFrame(rows)
+    fit = fit_historical_model(d, free_mean=True)
+    assert 0.03 < fit.mu < 0.14
+    assert fit.tau_e > 0
+    assert fit.tau_h > 0
+    jk = jackknife(d, free_mean=True)
+    assert set(jk["excluded_year"]) == set(year_effect)
