@@ -13,6 +13,7 @@ from historical_error import (
     extract_window_errors,
     fit_historical_model,
     jackknife,
+    loo_by_election,
 )
 
 
@@ -90,3 +91,28 @@ def test_fit_recovers_positive_mean_synthetic():
     assert fit.tau_h > 0
     jk = jackknife(d, free_mean=True)
     assert set(jk["excluded_year"]) == set(year_effect)
+
+
+def test_loo_uses_same_observed_target_and_baseline_for_competing_means(tmp_path):
+    years = [2002, 2006, 2010, 2014]
+    rows = []
+    for k, year in enumerate(years):
+        for j, pollster in enumerate(["A", "B", "C"]):
+            rows.append({
+                "election_year": year,
+                "pollster": pollster,
+                "pair_error_ilr": 0.03 + 0.01 * k + 0.002 * j,
+                "sampling_var_ilr": 0.015**2,
+            })
+    d = pd.DataFrame(rows)
+    results = pd.DataFrame([{
+        "election_year": year,
+        "result_ref_share": 0.45,
+        "result_opp_share": 0.40,
+    } for year in years])
+    free = loo_by_election(d, results, free_mean=True).sort_values("heldout_year").reset_index(drop=True)
+    zero = loo_by_election(d, results, free_mean=False).sort_values("heldout_year").reset_index(drop=True)
+    assert np.allclose(free["observed_consensus_ilr"], zero["observed_consensus_ilr"])
+    assert np.allclose(free["baseline_2p5_log_score"], zero["baseline_2p5_log_score"])
+    assert np.allclose(free["baseline_2p5_pred_mean_ilr"], zero["baseline_2p5_pred_mean_ilr"])
+    assert np.allclose(free["baseline_2p5_pred_sd_ilr"], zero["baseline_2p5_pred_sd_ilr"])
