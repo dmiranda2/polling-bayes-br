@@ -116,3 +116,28 @@ def test_loo_uses_same_observed_target_and_baseline_for_competing_means(tmp_path
     assert np.allclose(free["baseline_2p5_log_score"], zero["baseline_2p5_log_score"])
     assert np.allclose(free["baseline_2p5_pred_mean_ilr"], zero["baseline_2p5_pred_mean_ilr"])
     assert np.allclose(free["baseline_2p5_pred_sd_ilr"], zero["baseline_2p5_pred_sd_ilr"])
+
+
+def test_extract_excludes_election_day_rows(tmp_path):
+    results_path = tmp_path / "results.csv"
+    pd.DataFrame([{
+        "election_year": 2022, "election_date": "2022-10-02",
+        "reference_candidate": "Lula", "reference_party": "PT",
+        "opponent_candidate": "Jair Bolsonaro", "opponent_party": "PL",
+        "reference_votes": 57, "opponent_votes": 51, "total_valid_votes": 118,
+        "reference_aliases": "Lula", "opponent_aliases": "Jair Bolsonaro|Bolsonaro",
+        "source_url": "x",
+    }]).to_csv(results_path, index=False)
+    results = load_results(results_path)
+    rows=[]
+    for date,pid in [("2022-10-01","pre"),("2022-10-02","exit")]:
+        for cand,pct in [("Lula",48),("Jair Bolsonaro",42)]:
+            rows.append({
+                "ano":2022,"cargo":"presidente","data":date,"instituto":"A",
+                "turno":1,"nome_candidato":cand,"percentual":pct,"sigla_uf":None,
+                "tipo":"Estimulada","id_pesquisa":pid,"id_cenario":"1",
+                "tipo_voto":"Votos Totais","quantidade_entrevistas":2000,
+                "margem_mais":2.0,"condicao":0,
+            })
+    out,_=extract_window_errors(pd.DataFrame(rows),results,7)
+    assert set(out["poll_id"]) == {"pre"}
