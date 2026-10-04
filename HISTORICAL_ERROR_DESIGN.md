@@ -77,6 +77,7 @@ The extraction is deliberately fail-closed:
 - national polls only;
 - President, first round;
 - stimulated voting intention only;
+- **election-day observations are excluded** because the historical source does not reliably distinguish a final pre-election poll from an exit poll;
 - candidate rows only;
 - target pair must both be present;
 - target-pair shares must be positive and finite;
@@ -145,6 +146,7 @@ estimated initially. Six elections do not justify that many degrees of freedom. 
 Because 2022 may be atypical, Student-t tails are included only as a **second-stage diagnostic
 sensitivity** (fixed df = 3, 4, 5), alongside the Gaussian fit. They do not enter the production
 nowcast unless whole-election validation supports that choice.
+
 
 ## 2022 influence check
 
