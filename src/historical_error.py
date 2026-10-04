@@ -234,7 +234,9 @@ def source_filter_diagnostics(polls: pd.DataFrame, results: pd.DataFrame) -> pd.
             for val, cnt in ys["data"].dropna().dt.strftime("%Y-%m-%d").value_counts().sort_index().tail(12).items():
                 add(year, "stimulated_or_fallback", "recent_date", val, cnt)
         lo = pd.Timestamp(res.election_date) - pd.Timedelta(days=14)
-        hi = pd.Timestamp(res.election_date)
+        # Fail closed on election-day releases because the historical source does
+        # not reliably distinguish pre-election field polls from exit polls.
+        hi = pd.Timestamp(res.election_date) - pd.Timedelta(days=1)
         yw = ys[ys["data"].between(lo, hi, inclusive="both")].copy()
         add(year, "window14", "rows", "all", len(yw))
         if "nome_candidato" in yw:
@@ -309,7 +311,10 @@ def extract_window_errors(
     for res in results.itertuples(index=False):
         year = int(res.election_year)
         lo = pd.Timestamp(res.election_date) - pd.Timedelta(days=int(window_days))
-        hi = pd.Timestamp(res.election_date)
+        # Election-day records are excluded: some historical Poder360 rows are
+        # exit polls, and the source lacks a uniform flag that separates them
+        # from genuine pre-election releases.
+        hi = pd.Timestamp(res.election_date) - pd.Timedelta(days=1)
         y = d[d["ano"].eq(year) & d["data"].between(lo, hi, inclusive="both")].copy()
         initial_rows = len(y)
         initial_polls = int(y["id_pesquisa"].astype(str).nunique()) if not y.empty else 0
