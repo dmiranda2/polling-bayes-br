@@ -94,7 +94,7 @@ def _calibrate_historical(error_path: str | Path, results_path: str | Path) -> d
     info: dict = {
         "status": "external_fallback", "directional_mean_used": False,
         "mu_ilr": 0.0, "var_mu_ilr": 0.0,
-        "common_sd_ilr": float("nan"), "tau_h_ilr": 0.0, "tau_p_ilr": 0.0,
+        "common_sd_ilr": DEFAULT_EXTERNAL_SD_PP / 100.0 * 2 * math.sqrt(2), "tau_h_ilr": 0.0, "tau_p_ilr": 0.0,
         "reasons": [], "fit": None,
     }
     if not Path(error_path).exists():
