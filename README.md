@@ -2,6 +2,25 @@
 
 > **Nota de 09/10/2026 — segundo turno:** o modelo de primeiro turno v0.9.1 continua preservado para reprodutibilidade. O confronto Lula × Flávio Bolsonaro do segundo turno possui agora um pipeline independente (`src/runoff_nowcast.py`), com viés histórico estimado **exclusivamente de pesquisas de segundos turnos anteriores**, e não da base do primeiro turno. O arquivo `data/manual_second_round_2026.csv` inclui PoderData, Vox Brasil, Datafolha e AtlasIntel. A Atlas é tratada apenas na análise de sensibilidade porque começou a entrevistar antes da votação do primeiro turno. Consulte [desenho e limitações](docs/SECOND_ROUND_DESIGN.md).
 
+**Calibração histórica configurável (1º ou 2º turno; 7 dias ou 14–21 dias):**
+
+```bash
+# Compara primeiro e segundo turnos, cada um em seu próprio ajuste.
+python src/historical_calibration.py \
+  --round both --windows 1:3,1:7,1:14,14:21 \
+  --out output_history_rounds
+
+# Agora usamos o histórico do 2º turno com coleta histórica
+# entre 14 e 21 dias antes da respectiva votação.
+python src/runoff_nowcast.py \
+  --as-of 2026-10-09 \
+  --history output_history_rounds/round_2/historical_poll_errors.csv \
+  --historical-window 14:21 \
+  --out output_second_round_14_21
+```
+
+`--round 1` e `--round 2` também funcionam isoladamente. `1:7` significa dias 1 a 7 antes da eleição; `14:21` significa dias 14 a 21, ambos inclusivos. **Nunca misturamos dados dos dois turnos** nem usamos resultados da eleição omitida para calibrar a referência do backtest. Consulte [detalhes e limitações](docs/SECOND_ROUND_DESIGN.md).
+
 **Para reproduzir o retrato de 9 de outubro:**
 
 ```bash
