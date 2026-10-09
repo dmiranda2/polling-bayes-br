@@ -1,0 +1,5 @@
+as_of,historical_round,historical_window,scenario,n_historical_polls,n_historical_elections,free_mean_bias_ilr,loo_free_logscore,loo_zero_logscore,loo_external_baseline_logscore,directional_mean_applied,lula_polling_pct,flavio_polling_pct,lula_if_election_today_pct,lula_if_today_80_low_pct,lula_if_today_80_high_pct
+2026-10-09,2,1:7,strict_post_first_round,26,4,-0.0123035459,2.159419,2.653236,6.074614,false,48.5611,51.4389,48.5373,44.9391,52.2343
+2026-10-09,2,14:21,strict_post_first_round,23,4,-0.0639857934,1.693468,3.584577,4.049083,false,48.3086,51.6914,48.2874,44.8033,51.8520
+2026-10-09,2,1:7,mixed_atlas_included,26,4,-0.0123035459,2.159419,2.653236,6.074614,false,48.1843,51.8157,48.1597,44.6631,51.7436
+2026-10-09,2,14:21,mixed_atlas_included,23,4,-0.0639857934,1.693468,3.584577,4.049083,false,48.0670,51.9330,48.0440,44.6228,51.5504
