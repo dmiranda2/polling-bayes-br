@@ -136,7 +136,18 @@ def _calibrate_historical(error_path: str | Path, results_path: str | Path) -> d
         "tau_e_free_ilr": float(free.tau_e),
     })
     if score0 < baseline_score:
-        info["reasons"].append("zero-mean historical model loses LOO logscore to 2.5 pp external baseline")
+        # Keep independently estimable poll-level / institute heterogeneity, but
+        # use the better-validated external common-election error prior.
+        info["reasons"].append(
+            "zero-mean historical common-error scale loses whole-election LOO "
+            "to 2.5 pp external baseline; retaining second-round poll noise"
+        )
+        info.update({
+            "status": "external_common_prior_historical_poll_noise",
+            "tau_h_ilr": float(zero.tau_h),
+            "tau_p_ilr": float(zero.tau_p),
+            "fit": zero,
+        })
         return info
 
     jack_sign_stable = bool(abs(free.mu) > 1e-9 and (jk["mu_ilr"] * free.mu > 0).all())
