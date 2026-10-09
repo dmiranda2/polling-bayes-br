@@ -304,7 +304,7 @@ def main() -> None:
         "", "## Diagnósticos", "",
         f"- LOO histórico: {calib.get('n_historical_elections', 0)} eleições; {calib.get('n_historical_polls', 0)} levantamentos por instituto.",
         f"- Motivos de fallback/rejeição: {', '.join(calib['reasons']) or 'nenhum'}.",
-        f"- Fontes por registro disponíveis em \`polls_used_{as_of}.csv\`.",
+        f"- Fontes por registro disponíveis em `polls_used_{as_of}.csv`.",
     ])
     (outdir / f"report_{as_of}.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(result.to_string(index=False, float_format=lambda v: f"{v:.4f}"))
