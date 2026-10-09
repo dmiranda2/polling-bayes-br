@@ -1,0 +1,55 @@
+name: Second-round polling model
+
+on:
+  push:
+    branches: [v1-historical-error, main]
+    paths:
+      - 'src/historical_second_round.py'
+      - 'src/runoff_nowcast.py'
+      - 'tests/test_second_round.py'
+      - 'data/presidential_second_round_results.csv'
+      - 'data/manual_second_round_2026.csv'
+      - '.github/workflows/second-round.yml'
+      - 'requirements.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runoff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Dependencies
+        run: |
+          pip install -r requirements.txt pytest tabulate
+      - name: Regression tests, including first-round model
+        run: PYTHONPATH=src pytest -q
+      - name: Historical error, presidential SECOND ROUND only
+        run: |
+          python src/historical_second_round.py \
+            --results data/presidential_second_round_results.csv \
+            --out output_second_round_bias --windows 3,7,14
+      - name: Reproduce 9 October runoff nowcast
+        run: |
+          python src/runoff_nowcast.py \
+            --as-of 2026-10-09 \
+            --history output_second_round_bias/historical_poll_errors.csv \
+            --out output_second_round
+          cat output_second_round/report_2026-10-09.md
+      - name: Upload complete audit and estimates
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: second-round-2026-10-09
+          path: |
+            output_second_round/
+            output_second_round_bias/
+          if-no-files-found: warn
+          retention-days: 60
