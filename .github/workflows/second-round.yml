@@ -2,11 +2,14 @@ name: Second-round polling model
 
 on:
   push:
-    branches: [v1-historical-error, main]
+    branches: [v1-historical-error, main, feature/round-and-historical-windows]
     paths:
+      - 'src/historical_error.py'
       - 'src/historical_second_round.py'
+      - 'src/historical_calibration.py'
       - 'src/runoff_nowcast.py'
       - 'tests/test_second_round.py'
+      - 'tests/test_historical_windows.py'
       - 'data/presidential_second_round_results.csv'
       - 'data/manual_second_round_2026.csv'
       - '.github/workflows/second-round.yml'
@@ -31,18 +34,25 @@ jobs:
           pip install -r requirements.txt pytest tabulate
       - name: Regression tests, including first-round model
         run: PYTHONPATH=src pytest -q
-      - name: Historical error, presidential SECOND ROUND only
+      - name: Calibrate first AND second rounds separately, including 14 to 21 days
         run: |
-          python src/historical_second_round.py \
-            --results data/presidential_second_round_results.csv \
-            --out output_second_round_bias --windows 3,7,14
-      - name: Reproduce 9 October runoff nowcast
+          python src/historical_calibration.py \
+            --round both --windows 1:3,1:7,1:14,14:21 \
+            --out output_history_rounds
+      - name: Reproduce 9 October runoff nowcast using two historical windows
         run: |
           python src/runoff_nowcast.py \
             --as-of 2026-10-09 \
-            --history output_second_round_bias/historical_poll_errors.csv \
+            --history output_history_rounds/round_2/historical_poll_errors.csv \
+            --historical-window 1:7 \
             --out output_second_round
+          python src/runoff_nowcast.py \
+            --as-of 2026-10-09 \
+            --history output_history_rounds/round_2/historical_poll_errors.csv \
+            --historical-window 14:21 \
+            --out output_second_round_14_21
           cat output_second_round/report_2026-10-09.md
+          cat output_second_round_14_21/report_2026-10-09.md
       - name: Upload complete audit and estimates
         if: always()
         uses: actions/upload-artifact@v4
@@ -50,6 +60,7 @@ jobs:
           name: second-round-2026-10-09
           path: |
             output_second_round/
-            output_second_round_bias/
+            output_second_round_14_21/
+            output_history_rounds/
           if-no-files-found: warn
           retention-days: 60
