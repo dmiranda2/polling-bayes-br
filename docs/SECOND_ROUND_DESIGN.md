@@ -21,6 +21,40 @@ O arquivo `data/manual_second_round_2026.csv` armazena fontes e registros, além
 
 **O Atlas começa antes da votação de primeiro turno em 04/10.** Portanto o nowcast principal inclui somente as três pesquisas com coleta integralmente posterior. Um segundo resultado inclui Atlas como **sensibilidade**, com indicação no CSV e no relatório. Não misturamos pré e pós-primeiro turno como observações equivalentes.
 
+
+## Seleção de turno e janela histórica (atualização de 09/10)
+
+A calibração agora aceita **`--round 1`, `--round 2` ou `--round both`**. No modo `both`, o programa executa os dois ajustes **separadamente**: cada pesquisa entra apenas no seu turno e é comparada com o resultado eleitoral daquele turno. Nunca se misturam levantamentos nem erros de primeiro e segundo turnos.
+
+O argumento `--windows` aceita intervalos inclusivos de **dias anteriores à eleição**, escritos `proximo:distante`. O dia zero fica sempre excluído, por risco de confundir pesquisas eleitorais com pesquisas de boca de urna:
+
+- `1:7` utiliza os dias **1 a 7** antes do pleito (última semana);
+- `14:21` utiliza os dias **14 a 21** antes do pleito — aproximadamente a posição de 09/10 em relação ao segundo turno de 25/10;
+- `1:3` e `1:14` fornecem comparações adicionais;
+- o formato antigo `7` continua funcionando como abreviação de `1:7`.
+
+Exemplo completo:
+
+```bash
+python src/historical_calibration.py \
+  --round both --windows 1:3,1:7,1:14,14:21 \
+  --out output_history_rounds
+
+python src/runoff_nowcast.py \
+  --as-of 2026-10-09 \
+  --history output_history_rounds/round_2/historical_poll_errors.csv \
+  --historical-window 14:21 \
+  --out output_second_round_14_21
+```
+
+O novo arquivo de auditoria identifica `election_round`, `window_min_days`, `window_days` e `window_label`, impedindo que períodos com o mesmo limite superior sejam agregados acidentalmente. Janelas sem amostra histórica suficiente permanecem na auditoria, mas **não** geram estimativas artificiais. A calibração para o nowcast de segundo turno rejeita automaticamente arquivos de histórico sem identificação de turno ou contendo dados de primeiro turno.
+
+**Correção no backtest:** o baseline externo de 2,5 p.p. é convertido para a coordenada ILR em uma referência predeterminada de 50%/50%, sem consultar o resultado real da eleição omitida. Antes, essa transformação dependia indevidamente do resultado de teste; os logscores anteriores devem ser considerados provisórios até a nova execução.
+
+A coluna `data` do Poder360 histórico é interpretada como data do levantamento na extração. É necessário confirmar a semântica da fonte antes de afirmar que os intervalos correspondem rigorosamente às datas de campo dos levantamentos.
+
+A troca de janela é uma **análise de sensibilidade**; o código não escolhe automaticamente a janela que mais favorece um candidato ou a que melhor se ajusta ao resultado de 2026.
+
 ## Nowcast presente versus voto futuro
 
 O nowcast em `src/runoff_nowcast.py` usa pesos inversos à variância, com margens amostrais, dispersão residual histórica e incerteza do efeito de instituto separadas. A média histórica validada, se houver, é subtraída apenas na camada hipotética de eleição hoje; o erro comum da eleição **não** diminui artificialmente com mais sondagens do mesmo ciclo.
