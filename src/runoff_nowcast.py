@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from historical_calibration import parse_window_range, window_label
 from historical_second_round import (
     _effective_n, _norm_text, _random_effect_posterior,
     fit_historical_model, jackknife, load_results, loo_by_election,
@@ -89,9 +90,14 @@ def read_current_polls(path: str | Path, as_of: str, include_mixed: bool = False
     return surveys
 
 
-def _calibrate_historical(error_path: str | Path, results_path: str | Path) -> dict:
+def _calibrate_historical(error_path: str | Path, results_path: str | Path,
+                          window_range: str = "1:7") -> dict:
     """Gate directional historical bias on election-level validation, not poll LOO."""
+    near, far = parse_window_range(window_range)
+    selected_window = window_label((near, far))
     info: dict = {
+        "historical_round": 2,
+        "historical_window_range": selected_window,
         "status": "external_fallback", "directional_mean_used": False,
         "mu_ilr": 0.0, "var_mu_ilr": 0.0,
         "common_sd_ilr": DEFAULT_EXTERNAL_SD_PP / 100.0 * 2 * math.sqrt(2), "tau_h_ilr": 0.0, "tau_p_ilr": 0.0,
@@ -101,9 +107,20 @@ def _calibrate_historical(error_path: str | Path, results_path: str | Path) -> d
         info["reasons"].append("historical second-round calibration file absent")
         return info
     e = pd.read_csv(error_path)
-    x = e[e["window_days"].eq(7)].copy()
+    required = {"election_round", "window_min_days", "window_days", "election_year"}
+    missing = required - set(e.columns)
+    if missing:
+        info["reasons"].append("unauditable history; missing " + ", ".join(sorted(missing)))
+        return info
+    if not e["election_round"].eq(2).all():
+        info["reasons"].append("historical file contains first-round or mixed-round polls")
+        return info
+    x = e[e["window_days"].eq(far) & e["window_min_days"].eq(near)].copy()
     if x["election_year"].nunique() < 4 or len(x) < 12:
-        info["reasons"].append("fewer than four elections or twelve historical institute observations")
+        info["reasons"].append(
+            "insufficient history for window " + selected_window +
+            " (requires four elections and twelve independent polls)"
+        )
         return info
 
     try:
@@ -152,15 +169,21 @@ def _calibrate_historical(error_path: str | Path, results_path: str | Path) -> d
 
     jack_sign_stable = bool(abs(free.mu) > 1e-9 and (jk["mu_ilr"] * free.mu > 0).all())
     window_sign_stable = True
-    for window in (3, 14):
-        ww = e[e["window_days"].eq(window)]
+    # Require consistency with two different periods, not just one cherry-picked slice.
+    comparators = [(1, 3), (1, 14)] if (near, far) == (1, 7) else [(1, 7), (1, 14)]
+    for other_near, other_far in comparators:
+        if (other_near, other_far) == (near, far):
+            continue
+        ww = e[e["window_days"].eq(other_far) & e["window_min_days"].eq(other_near)]
+        other = window_label((other_near, other_far))
         if ww["election_year"].nunique() < 4 or len(ww) < 12:
             window_sign_stable = False
-            info["reasons"].append(f"{window}-day historical window has insufficient coverage")
+            info["reasons"].append(f"comparison window {other} has insufficient historical coverage")
             continue
         fw = fit_historical_model(ww, free_mean=True)
         if fw.mu * free.mu <= 0:
             window_sign_stable = False
+            info["reasons"].append(f"bias direction differs between {selected_window} and {other}")
     accept_mean = bool(
         scoref > score0 and scoref >= baseline_score
         and jack_sign_stable and window_sign_stable
@@ -263,6 +286,7 @@ def main() -> None:
     p.add_argument("--polls", default="data/manual_second_round_2026.csv")
     p.add_argument("--history", default="output_second_round_bias/historical_poll_errors.csv")
     p.add_argument("--results", default="data/presidential_second_round_results.csv")
+    p.add_argument("--historical-window", default="1:7", help="Historical days-before window: 1:7, 14:21, etc.")
     p.add_argument("--as-of", default=None, help="YYYY-MM-DD; defaults to current date")
     p.add_argument("--out", default="output_second_round")
     p.add_argument("--draws", type=int, default=30000)
@@ -270,7 +294,7 @@ def main() -> None:
     as_of = a.as_of or pd.Timestamp.today().date().isoformat()
     outdir = Path(a.out)
     outdir.mkdir(parents=True, exist_ok=True)
-    calib = _calibrate_historical(a.history, a.results)
+    calib = _calibrate_historical(a.history, a.results, a.historical_window)
     outcomes, inputs = [], []
     for mixed in (False, True):
         polls = read_current_polls(a.polls, as_of, include_mixed=mixed)
@@ -285,12 +309,14 @@ def main() -> None:
     audit = {k: v for k, v in calib.items() if k != "fit"}
     audit["as_of"] = as_of
     audit["historical_data_origin"] = "SECOND-ROUND polls only (2002-2022)"
+    audit["historical_window_range"] = window_label(parse_window_range(a.historical_window))
     (outdir / f"bias_audit_{as_of}.json").write_text(
         json.dumps(audit, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     lines = [
         f"# Segundo turno — retrato de {as_of}", "",
         "Comparação Lula (PT) × Flávio Bolsonaro (PL), votos válidos.", "",
         f"Calibração: **{calib['status']}**. Média direcional histórica aplicada: **{calib['directional_mean_used']}**.", "",
+        f"Janela histórica selecionada: {calib['historical_window_range']} dias antes do 2º turno.", "",
         "O primeiro cenário **exclui Atlas**: seu campo começou antes do 1º turno.",
         "O segundo cenário inclui Atlas apenas como sensibilidade.", "",
         "| Cenário | N | Lula — pesquisas (%) | Flávio — pesquisas (%) | Lula — correção de erro comum (80%) |",
