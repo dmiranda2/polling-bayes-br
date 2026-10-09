@@ -254,6 +254,8 @@ def extract_window_errors(
     window_days: int,
     default_n: float = 1200.0,
     design_effect: float = 1.5,
+    *,
+    min_days_before: int = 1,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Build one latest national second-round poll per institute/election.
 
@@ -261,6 +263,8 @@ def extract_window_errors(
     by converting total-vote shares to valid-vote shares, which removes one
     otherwise fragile historical harmonization step.
     """
+    if not (1 <= int(min_days_before) <= int(window_days) <= 120):
+        raise ValueError("Window must satisfy 1 <= min_days_before <= window_days <= 120")
     d = polls.copy()
     needed = {"ano", "cargo", "data", "instituto", "turno", "nome_candidato", "percentual"}
     missing = needed - set(d.columns)
@@ -314,14 +318,15 @@ def extract_window_errors(
         # Election-day records are excluded: some historical Poder360 rows are
         # exit polls, and the source lacks a uniform flag that separates them
         # from genuine pre-election releases.
-        hi = pd.Timestamp(res.election_date) - pd.Timedelta(days=1)
+        hi = pd.Timestamp(res.election_date) - pd.Timedelta(days=int(min_days_before))
         y = d[d["ano"].eq(year) & d["data"].between(lo, hi, inclusive="both")].copy()
         initial_rows = len(y)
         initial_polls = int(y["id_pesquisa"].astype(str).nunique()) if not y.empty else 0
 
         if y.empty:
             audit.append({
-                "election_year": year, "window_days": int(window_days),
+                "election_year": year, "window_days": int(window_days), "window_min_days": int(min_days_before),
+                "window_label": f"{min_days_before}:{window_days}", "election_round": 2,
                 "rows_in_window": 0, "polls_in_window": 0,
                 "pair_scenarios": 0, "institutes_retained": 0,
             })
@@ -356,7 +361,8 @@ def extract_window_errors(
             s2 = pair_ilr_sampling_var(p_ref, p_opp, neff)
             candidates.append({
                 "election_year": year,
-                "window_days": int(window_days),
+                "window_days": int(window_days), "window_min_days": int(min_days_before),
+                "window_label": f"{min_days_before}:{window_days}", "election_round": 2,
                 "election_date": pd.Timestamp(res.election_date).date().isoformat(),
                 "poll_date": date.date().isoformat(),
                 "days_before": int((pd.Timestamp(res.election_date) - date).days),
@@ -386,7 +392,8 @@ def extract_window_errors(
         cand = pd.DataFrame(candidates)
         if cand.empty:
             audit.append({
-                "election_year": year, "window_days": int(window_days),
+                "election_year": year, "window_days": int(window_days), "window_min_days": int(min_days_before),
+                "window_label": f"{min_days_before}:{window_days}", "election_round": 2,
                 "rows_in_window": initial_rows, "polls_in_window": initial_polls,
                 "pair_scenarios": 0, "institutes_retained": 0,
             })
@@ -411,7 +418,8 @@ def extract_window_errors(
 
         rows.extend(cand.to_dict("records"))
         audit.append({
-            "election_year": year, "window_days": int(window_days),
+            "election_year": year, "window_days": int(window_days), "window_min_days": int(min_days_before),
+                "window_label": f"{min_days_before}:{window_days}", "election_round": 2,
             "rows_in_window": initial_rows, "polls_in_window": initial_polls,
             "pair_scenarios": int(len(candidates)),
             "institutes_retained": int(cand["pollster"].nunique()),
@@ -420,7 +428,7 @@ def extract_window_errors(
     out = pd.DataFrame(rows)
     if not out.empty:
         out = out.drop(columns=["prefer_valid"], errors="ignore").sort_values(
-            ["window_days", "election_year", "pollster"]
+            ["window_days", "window_min_days", "election_year", "pollster"]
         ).reset_index(drop=True)
     return out, pd.DataFrame(audit)
 
@@ -685,25 +693,14 @@ def _fixed_consensus_weights(hold: pd.DataFrame) -> np.ndarray:
 
 
 def _baseline_ilr_sd_from_result(row: pd.Series, target_pp: float = 2.5) -> float:
-    """Approximate current external-prior scale in the first ILR coordinate.
+    """Fixed ILR scale at p=(0.5, 0.5) without using held-out results.
 
-    Use a three-part composition (reference, opponent, all other valid votes) and
-    the same isotropic-ILR calibration principle as the production model.
+    Previous scale depended on the *true* test-election result, leaking
+    information into the LOO baseline. 'row' remains only for compatibility.
     """
-    p1 = float(row["result_ref_share"])
-    p2 = float(row["result_opp_share"])
-    p3 = max(1.0 - p1 - p2, 1e-9)
-    p = np.array([p1, p2, p3], float)
-    p /= p.sum()
-    H = np.array([
-        [1 / math.sqrt(2), 1 / math.sqrt(6)],
-        [-1 / math.sqrt(2), 1 / math.sqrt(6)],
-        [0.0, -2 / math.sqrt(6)],
-    ])
-    J = (np.diag(p) - np.outer(p, p)) @ H
-    rms = float(np.sqrt(np.mean(np.sum(J[:2, :] ** 2, axis=1))))
-    return (float(target_pp) / 100.0) / max(rms, 1e-9)
-
+    if not (math.isfinite(float(target_pp)) and float(target_pp) > 0):
+        raise ValueError("target_pp must be strictly positive")
+    return 2.0 * math.sqrt(2.0) * float(target_pp) / 100.0
 
 def loo_by_election(df: pd.DataFrame, results: pd.DataFrame, free_mean: bool,
                     baseline_pp: float = 2.5) -> pd.DataFrame:
