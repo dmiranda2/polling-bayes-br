@@ -1,0 +1,51 @@
+name: Historical error experiment
+
+on:
+  push:
+    branches: [v1-historical-error]
+    paths:
+      - 'src/historical_error.py'
+      - 'tests/test_historical_error.py'
+      - 'data/presidential_first_round_results.csv'
+      - 'data/historical_2018_final_window.csv'
+      - 'data/tse_2022_field_dates.csv'
+      - 'HISTORICAL_ERROR_DESIGN.md'
+      - 'requirements.txt'
+      - '.github/workflows/historical-error.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  calibrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v1-historical-error
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install tabulate pytest
+      - name: Run tests
+        run: PYTHONPATH=src pytest -q
+      - name: Run historical calibration
+        run: |
+          python src/historical_error.py \
+            --results data/presidential_first_round_results.csv \
+            --out output_historical_error \
+            --windows 3,7,14
+      - name: Upload diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-error-diagnostics
+          path: output_historical_error/
+          if-no-files-found: error
+          retention-days: 30
