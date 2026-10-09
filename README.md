@@ -1,5 +1,16 @@
 # polling-bayes-br
 
+> **Nota de 09/10/2026 — segundo turno:** o modelo de primeiro turno v0.9.1 continua preservado para reprodutibilidade. O confronto Lula × Flávio Bolsonaro do segundo turno possui agora um pipeline independente (`src/runoff_nowcast.py`), com viés histórico estimado **exclusivamente de pesquisas de segundos turnos anteriores**, e não da base do primeiro turno. O arquivo `data/manual_second_round_2026.csv` inclui PoderData, Vox Brasil, Datafolha e AtlasIntel. A Atlas é tratada apenas na análise de sensibilidade porque começou a entrevistar antes da votação do primeiro turno. Consulte [desenho e limitações](docs/SECOND_ROUND_DESIGN.md).
+
+**Para reproduzir o retrato de 9 de outubro:**
+
+```bash
+python src/historical_second_round.py --out output_second_round_bias --windows 3,7,14
+python src/runoff_nowcast.py --as-of 2026-10-09
+```
+
+A primeira etapa usa a base histórica Poder360/Base dos Dados e o segundo comando preserva fallback explícito se não houver histórico validado. Os valores são nowcast presente, **não** previsão da urna em 25/10.
+
 Agregador experimental de pesquisas nacionais para a eleição presidencial brasileira.
 
 > **Versão atual: v0.9.1**
