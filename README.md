@@ -1,10 +1,13 @@
-> **Atualização de 10/10/2026 — comparação com e sem viés do 1º turno:** o pipeline de segundo turno agora gera automaticamente um **retrato não corrigido** e outro **com transferência hipotética do erro do instituto no 1º turno de 2026**, mais uma sensibilidade Atlas. As dez referências de instituto e 19 registros futuros do calendário enviado estão em CSVs separados. **Resultados agendados para 11–16/10 não são tratados como resultados publicados.** Para executar:
+> **Atualização de 10/10/2026 — duas versões do segundo turno:**
+> O pipeline entrega o consenso de pesquisas sem deslocamento de viés e
+> separadamente o consenso com ajustes aprendidos EXCLUSIVAMENTE do histórico
+> de pesquisas e urnas de SEGUNDOS turnos anteriores. Não utiliza o erro
+> observado no primeiro turno de 2026 para corrigir o segundo.
+> Os registros de futuras pesquisas são apenas um calendário, nunca resultados.
+> A média direcional histórica comum continua sujeita à validação por eleição.
 >
-> \`python src/runoff_nowcast.py --as-of 2026-10-10 --historical-window 14:21\`
+> Execução: python src/runoff_nowcast.py --as-of 2026-10-10 --historical-window 14:21 --bias-modes both
 >
-> Consulte [descrição, fórmulas e limitações](docs/SECOND_ROUND_DESIGN.md).
->
-
 # polling-bayes-br
 
 > **Nota de 09/10/2026 — segundo turno:** o modelo de primeiro turno v0.9.1 continua preservado para reprodutibilidade. O confronto Lula × Flávio Bolsonaro do segundo turno possui agora um pipeline independente (`src/runoff_nowcast.py`), com viés histórico estimado **exclusivamente de pesquisas de segundos turnos anteriores**, e não da base do primeiro turno. O arquivo `data/manual_second_round_2026.csv` inclui PoderData, Vox Brasil, Datafolha e AtlasIntel. A Atlas é tratada apenas na análise de sensibilidade porque começou a entrevistar antes da votação do primeiro turno. Consulte [desenho e limitações](docs/SECOND_ROUND_DESIGN.md).

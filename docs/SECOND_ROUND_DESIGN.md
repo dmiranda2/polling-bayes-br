@@ -37,8 +37,8 @@ Exemplo completo:
 
 ```bash
 python src/historical_calibration.py \
-  --round both --windows 1:3,1:7,1:14,14:21 \
-  --out output_history_rounds
+  --round 2 --windows 1:3,1:7,1:14,14:21 \
+  --out output_history_rounds/round_2
 
 python src/runoff_nowcast.py \
   --as-of 2026-10-09 \
@@ -72,43 +72,47 @@ PYTHONPATH=src pytest -q
 Executar o nowcast sem calibração histórica produz resultado explicitamente marcado como `external_fallback`. Os arquivos gerados incluem auditoria do histórico, fontes individuais e uma sensibilidade Atlas.
 
 
-## Duas saídas paralelas com viés do primeiro turno (10/10/2026)
 
-A nova camada usa **somente como sensibilidade** os erros informados no calendário do usuário de 10/10/2026. Não altera a calibração de erro comum de **segundos turnos históricos** descrita acima.
+## Comparação de segundo turno: sem e com correção EXCLUSIVAMENTE do segundo turno (10/10/2026)
 
-Definimos sempre a margem como **Flávio menos Lula**. Cada erro de instituto informado é:
+**O modelo nunca transfere para o segundo turno o erro observado no primeiro turno de 2026.**
+A calibração usa pesquisas de SEGUNDO turno históricas comparadas com urnas de SEGUNDO turno do respectivo ano.
+Preservamos os arquivos do modelo de primeiro turno para reprodução de trabalhos antigos, mas eles são completamente separados.
+
+Os dois modos são executados sobre exatamente os mesmos levantamentos atuais de segundo turno (com as mesmas variâncias e ponderações):
+
+1. **Sem correção:** na estimativa central, cada levantamento permanece com os seus percentuais publicados (a coordenada ILR original). Não se subtrai efeito histórico de instituto nem média direcional comum.
+2. **Com correção do histórico de segundo turno:** para cada instituto, subtrai-se o efeito posterior regularizado estimado apenas em SEGUNDOS turnos anteriores, se houver correspondência histórica; institutos sem histórico não recebem deslocamento. A média comum pesquisa menos urna só é subtraída à distribuição hipotética de urna hoje se passar os critérios LOO por eleição inteira, estabilidade de sinal, janelas e jackknife.
+
+A variável modelada é:
 
 \[
-b_j^{(1)}=[F-L]_{\text{pesquisa, 1ºT}}-[F-L]_{\text{urna, 1ºT}}.
+ z=\frac{\log p_{\mathrm{Lula}}-\log p_{\mathrm{Flávio}}}{\sqrt2},
+ \qquad
+ z_{\mathrm{ajustado}}=z_{\mathrm{pesquisa,2T}}-\widehat h_{\mathrm{instituto,2T}}.
 \]
 
-As dez linhas informadas são consistentes com uma margem de referência de +1,8 ponto percentual, inferida dos próprios dados fornecidos (sem checagem independente do resultado oficial). A hipótese de transferência produz
+Os efeitos históricos de instituto não representam uma garantia de persistência no ciclo de 2026. A parte comum do viés é mantida em zero se não validada, mesmo que a estimativa livre calculada seja diferente de zero. O erro eleitoral comum permanece separado do erro amostral e da dispersão residual.
 
-\[
- [F-L]_{\mathrm{2ºT,corr}}=[F-L]_{\mathrm{2ºT,publicado}}-b_j^{(1)},
- \quad L_{\mathrm{corr}}=L_{\mathrm{publicado}}+b_j^{(1)}/2,
- \quad F_{\mathrm{corr}}=F_{\mathrm{publicado}}-b_j^{(1)}/2.
-\]
+O cenário principal considera somente pesquisas publicadas e com coleta integralmente posterior ao primeiro turno de 04/10. A pesquisa Atlas, cujo campo começou em 03/10, permanece apenas como sensibilidade; as pesquisas previstas no calendário para 11–16/10 não entram antes de seus resultados serem efetivamente publicados.
 
-Isso preserva L+F=100 e usa a **mesma observação, mesma amostragem e mesma calibração de segundo turno** nos dois modos. Trata-se de um ajuste de margem em pontos percentuais, não de usar percentuais brutos de primeiro turno como votos válidos de segundo turno. Após o ajuste de margens, convertemos as proporções à coordenada ILR para executar o agregador normalmente.
+O arquivo data/scheduled_polls_2026_10_10.csv contém somente instituto, registro, alcance, amostra e datas. Inclui 11 pesquisas nacionais previstas e 8 regionais, com alertas de conflito de datas nos registros BR-05187 e BR-06778. O calendário não contém percentuais de votação nem erros de primeiro turno.
 
-A saída **sem correção** usa as percentagens publicadas e é a referência principal. A saída **com correção de 1º turno** supõe transferência integral de cada viés e deve ser lida como sensibilidade: a estabilidade de um erro específico entre turnos não foi validada. Os intervalos condicionais apresentados na versão corrigida **não** incluem incerteza de transporte desse viés.
+### Comandos reproduzíveis
 
-Viés não conhecido não é igual a viés zero. Institutos não identificados (atualmente Vox Brasil) permanecem sem ajuste e aparecem claramente identificados, com quantidade e cobertura amostral ponderada no relatório. Equivalências de marca são verificadas em data/pollster_aliases.csv.
+Primeiro, calibrar apenas segundos turnos históricos:
 
-Arquivos novos:
+    python src/historical_calibration.py --round 2 --windows 1:3,1:7,1:14,14:21 --out output_history_rounds/round_2
 
-- data/first_round_pollster_bias_2026.csv — erros de margem extraídos do calendário fornecido;
-- data/scheduled_polls_2026_10_10.csv — registros futuros nacionais e regionais, com dados das últimas pesquisas apenas como referências, **não resultados futuros**;
-- src/first_round_bias.py — validação de sinais e aplicação condicional dos erros;
-- tests/test_first_round_bias.py — testes de identidade, sinal, cobertura e proteção contra resultados futuros.
+Depois, gerar as duas versões do mesmo nowcast de segundo turno:
 
-Execução (o comando gera **dois relatórios** e **dois CSVs** além do comparativo):
+    python src/runoff_nowcast.py --as-of 2026-10-10 --history output_history_rounds/round_2/historical_poll_errors.csv --historical-window 14:21 --bias-modes both
 
-    python src/runoff_nowcast.py --as-of 2026-10-10 --bias-modes both --historical-window 14:21
+O programa grava:
 
-Arquivos de saída incluem report_uncorrected_2026-10-10.md, report_first_round_corrected_2026-10-10.md, nowcast_uncorrected_2026-10-10.csv, nowcast_first_round_corrected_2026-10-10.csv, polls_used_2026-10-10.csv, calendar_audit_2026-10-10.csv e report_2026-10-10.md.
+- nowcast_uncorrected_2026-10-10.csv e report_uncorrected_2026-10-10.md;
+- nowcast_second_round_corrected_2026-10-10.csv e report_second_round_corrected_2026-10-10.md;
+- nowcast_2026-10-10.csv e report_2026-10-10.md para comparação;
+- polls_used_2026-10-10.csv, bias_audit_2026-10-10.json e calendar_audit_2026-10-10.csv para auditoria.
 
-**Auditoria de calendário:** BR-05187 (Gerp) e BR-06778 (Correio do Povo/TO) têm data de publicação prevista anterior ao encerramento do campo. Eles permanecem registrados e sinalizados, mas não são convertidos em resultados. As pesquisas regionais tampouco entram no agregado nacional. Novos levantamentos nacionais entram **somente quando há resultado de segundo turno publicado e auditado** em data/manual_second_round_2026.csv.
-
-Esta camada não transforma o nowcast em previsão para a urna de 25/10.
+**Nenhuma versão constitui previsão do resultado de 25 de outubro de 2026.**
