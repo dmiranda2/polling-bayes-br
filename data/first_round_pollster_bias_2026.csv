@@ -1,0 +1,11 @@
+pollster,first_round_poll_date,first_round_lula_pct,first_round_flavio_pct,bias_flavio_minus_lula_pp,reference_actual_margin_flavio_minus_lula_pp,source_basis
+DataTrends,2026-10-02,41,39,-3.8,1.8,user_calendar_2026-10-10
+Futura/Apex,2026-09-30,39.4,42.2,1.0,1.8,user_calendar_2026-10-10
+Gerp,2026-09-29,40,42,0.2,1.8,user_calendar_2026-10-10
+Nexus/FSB/BTG,2026-09-28,42,37,-6.8,1.8,user_calendar_2026-10-10
+Quaest,2026-10-03,40,38,-3.8,1.8,user_calendar_2026-10-10
+AtlasIntel,2026-10-03,46.7,43.8,-4.7,1.8,user_calendar_2026-10-10
+Datafolha,2026-10-03,42,40,-3.8,1.8,user_calendar_2026-10-10
+Indexa,2026-09-30,39,34,-6.8,1.8,user_calendar_2026-10-10
+Palver,2026-10-03,43,47,2.2,1.8,user_calendar_2026-10-10
+PoderData,2026-10-03,42,41,-2.8,1.8,user_calendar_2026-10-10

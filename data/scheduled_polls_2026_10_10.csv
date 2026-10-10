@@ -1,0 +1,20 @@
+poll_id,pollster,scope,uf,expected_publish_date,field_start,field_end,n,prior_first_round_poll_date,prior_first_round_lula_pct,prior_first_round_flavio_pct,bias_flavio_minus_lula_pp,prior_second_round_poll_date,prior_second_round_lula_valid_pct,prior_second_round_flavio_valid_pct,notes,source_basis
+BR-03576,DataTrends,national,BR,2026-10-11,2026-10-07,2026-10-09,2000,2026-10-02,41,39,-3.8,2026-10-02,50,50,,user_calendar_2026-10-10
+BR-00650,Futura/Apex,national,BR,2026-10-13,2026-10-07,2026-10-10,2000,2026-09-30,39.4,42.2,1,2026-09-30,47,53,,user_calendar_2026-10-10
+BR-07877,Gerp,national,BR,2026-10-13,2026-10-08,2026-10-12,2400,2026-09-29,40,42,0.2,2026-09-29,46,54,,user_calendar_2026-10-10
+BR-05187,Gerp,national,BR,2026-10-13,2026-10-14,2026-10-16,2400,2026-09-29,40,42,0.2,2026-09-29,46,54,Data de publicacao informada antecede fim do campo; verificar registro.,user_calendar_2026-10-10
+BR-07997,Nexus/FSB/BTG,national,BR,2026-10-13,2026-10-10,2026-10-12,2000,2026-09-28,42,37,-6.8,2026-09-28,51,49,,user_calendar_2026-10-10
+BR-08729,Quaest,national,BR,2026-10-14,2026-10-10,2026-10-13,2154,2026-10-03,40,38,-3.8,,,,,user_calendar_2026-10-10
+BR-01093,AtlasIntel,national,BR,2026-10-15,2026-10-09,2026-10-14,5000,2026-10-03,46.7,43.8,-4.7,2026-10-09,47.2,52.8,,user_calendar_2026-10-10
+BR-00466,Datafolha,national,BR,2026-10-15,2026-10-13,2026-10-15,2520,2026-10-03,42,40,-3.8,2026-10-08,48,52,,user_calendar_2026-10-10
+BR-04629,Indexa,national,BR,2026-10-15,2026-10-13,2026-10-14,2000,2026-09-30,39,34,-6.8,2026-09-30,50.6,49.4,,user_calendar_2026-10-10
+BR-08028,Palver,national,BR,2026-10-15,2026-10-10,2026-10-14,5000,2026-10-03,43,47,2.2,2026-10-03,47.3,52.7,,user_calendar_2026-10-10
+BR-04258,PoderData,national,BR,2026-10-16,2026-10-13,2026-10-15,3000,2026-10-03,42,41,-2.8,2026-10-08,47,53,,user_calendar_2026-10-10
+BR-02236,Direct,regional,DF,2026-10-10,2026-10-06,2026-10-10,1200,,,,,,,,user_calendar_2026-10-10
+BR-05793,Direct,regional,TO,2026-10-10,2026-10-06,2026-10-10,1200,,,,,,,,user_calendar_2026-10-10
+BR-04715,Opnus,regional,CE,2026-10-10,2026-10-04,2026-10-04,4800,,,,,,,,user_calendar_2026-10-10
+BR-06778,Correio do Povo,regional,TO,2026-10-11,2026-10-06,2026-10-12,1600,,,,,,,Data de publicacao informada antecede fim do campo; verificar registro.,user_calendar_2026-10-10
+BR-04487,Seta,regional,RN,2026-10-11,2026-10-07,2026-10-10,1500,,,,,,,,user_calendar_2026-10-10
+BR-07193,PoderData,regional,AM,2026-10-12,2026-10-08,2026-10-11,1200,,,,,,,,user_calendar_2026-10-10
+BR-06799,Quaest,regional,DF,2026-10-12,2026-10-08,2026-10-11,1104,,,,,,,,user_calendar_2026-10-10
+BR-02875,Quaest,regional,RJ,2026-10-12,2026-10-08,2026-10-11,1302,,,,,,,,user_calendar_2026-10-10

@@ -70,3 +70,45 @@ PYTHONPATH=src pytest -q
 ```
 
 Executar o nowcast sem calibração histórica produz resultado explicitamente marcado como `external_fallback`. Os arquivos gerados incluem auditoria do histórico, fontes individuais e uma sensibilidade Atlas.
+
+
+## Duas saídas paralelas com viés do primeiro turno (10/10/2026)
+
+A nova camada usa **somente como sensibilidade** os erros informados no calendário do usuário de 10/10/2026. Não altera a calibração de erro comum de **segundos turnos históricos** descrita acima.
+
+Definimos sempre a margem como **Flávio menos Lula**. Cada erro de instituto informado é:
+
+\[
+b_j^{(1)}=[F-L]_{\text{pesquisa, 1ºT}}-[F-L]_{\text{urna, 1ºT}}.
+\]
+
+As dez linhas informadas são consistentes com uma margem de referência de +1,8 ponto percentual, inferida dos próprios dados fornecidos (sem checagem independente do resultado oficial). A hipótese de transferência produz
+
+\[
+ [F-L]_{\mathrm{2ºT,corr}}=[F-L]_{\mathrm{2ºT,publicado}}-b_j^{(1)},
+ \quad L_{\mathrm{corr}}=L_{\mathrm{publicado}}+b_j^{(1)}/2,
+ \quad F_{\mathrm{corr}}=F_{\mathrm{publicado}}-b_j^{(1)}/2.
+\]
+
+Isso preserva L+F=100 e usa a **mesma observação, mesma amostragem e mesma calibração de segundo turno** nos dois modos. Trata-se de um ajuste de margem em pontos percentuais, não de usar percentuais brutos de primeiro turno como votos válidos de segundo turno. Após o ajuste de margens, convertemos as proporções à coordenada ILR para executar o agregador normalmente.
+
+A saída **sem correção** usa as percentagens publicadas e é a referência principal. A saída **com correção de 1º turno** supõe transferência integral de cada viés e deve ser lida como sensibilidade: a estabilidade de um erro específico entre turnos não foi validada. Os intervalos condicionais apresentados na versão corrigida **não** incluem incerteza de transporte desse viés.
+
+Viés não conhecido não é igual a viés zero. Institutos não identificados (atualmente Vox Brasil) permanecem sem ajuste e aparecem claramente identificados, com quantidade e cobertura amostral ponderada no relatório. Equivalências de marca são verificadas em data/pollster_aliases.csv.
+
+Arquivos novos:
+
+- data/first_round_pollster_bias_2026.csv — erros de margem extraídos do calendário fornecido;
+- data/scheduled_polls_2026_10_10.csv — registros futuros nacionais e regionais, com dados das últimas pesquisas apenas como referências, **não resultados futuros**;
+- src/first_round_bias.py — validação de sinais e aplicação condicional dos erros;
+- tests/test_first_round_bias.py — testes de identidade, sinal, cobertura e proteção contra resultados futuros.
+
+Execução (o comando gera **dois relatórios** e **dois CSVs** além do comparativo):
+
+    python src/runoff_nowcast.py --as-of 2026-10-10 --bias-modes both --historical-window 14:21
+
+Arquivos de saída incluem report_uncorrected_2026-10-10.md, report_first_round_corrected_2026-10-10.md, nowcast_uncorrected_2026-10-10.csv, nowcast_first_round_corrected_2026-10-10.csv, polls_used_2026-10-10.csv, calendar_audit_2026-10-10.csv e report_2026-10-10.md.
+
+**Auditoria de calendário:** BR-05187 (Gerp) e BR-06778 (Correio do Povo/TO) têm data de publicação prevista anterior ao encerramento do campo. Eles permanecem registrados e sinalizados, mas não são convertidos em resultados. As pesquisas regionais tampouco entram no agregado nacional. Novos levantamentos nacionais entram **somente quando há resultado de segundo turno publicado e auditado** em data/manual_second_round_2026.csv.
+
+Esta camada não transforma o nowcast em previsão para a urna de 25/10.

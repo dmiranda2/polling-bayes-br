@@ -8,10 +8,15 @@ on:
       - 'src/historical_second_round.py'
       - 'src/historical_calibration.py'
       - 'src/runoff_nowcast.py'
+      - 'src/first_round_bias.py'
       - 'tests/test_second_round.py'
+      - 'tests/test_first_round_bias.py'
       - 'tests/test_historical_windows.py'
       - 'data/presidential_second_round_results.csv'
       - 'data/manual_second_round_2026.csv'
+      - 'data/first_round_pollster_bias_2026.csv'
+      - 'data/scheduled_polls_2026_10_10.csv'
+      - 'data/pollster_aliases.csv'
       - '.github/workflows/second-round.yml'
       - 'requirements.txt'
   workflow_dispatch:
@@ -53,6 +58,12 @@ jobs:
             --out output_second_round_14_21
           cat output_second_round/report_2026-10-09.md
           cat output_second_round_14_21/report_2026-10-09.md
+          python src/runoff_nowcast.py \
+            --as-of 2026-10-10 \
+            --history output_history_rounds/round_2/historical_poll_errors.csv \
+            --historical-window 14:21 \
+            --out output_second_round_2026_10_10
+          cat output_second_round_2026_10_10/report_2026-10-10.md
       - name: Upload complete audit and estimates
         if: always()
         uses: actions/upload-artifact@v4
@@ -61,6 +72,7 @@ jobs:
           path: |
             output_second_round/
             output_second_round_14_21/
+            output_second_round_2026_10_10/
             output_history_rounds/
           if-no-files-found: warn
           retention-days: 60
