@@ -8,15 +8,13 @@ on:
       - 'src/historical_second_round.py'
       - 'src/historical_calibration.py'
       - 'src/runoff_nowcast.py'
-      - 'src/first_round_bias.py'
+      - 'src/runoff_calendar.py'
       - 'tests/test_second_round.py'
-      - 'tests/test_first_round_bias.py'
+      - 'tests/test_runoff_two_modes.py'
       - 'tests/test_historical_windows.py'
       - 'data/presidential_second_round_results.csv'
       - 'data/manual_second_round_2026.csv'
-      - 'data/first_round_pollster_bias_2026.csv'
       - 'data/scheduled_polls_2026_10_10.csv'
-      - 'data/pollster_aliases.csv'
       - '.github/workflows/second-round.yml'
       - 'requirements.txt'
   workflow_dispatch:
@@ -39,11 +37,11 @@ jobs:
           pip install -r requirements.txt pytest tabulate
       - name: Regression tests, including first-round model
         run: PYTHONPATH=src pytest -q
-      - name: Calibrate first AND second rounds separately, including 14 to 21 days
+      - name: Calibrate second-round history ONLY
         run: |
           python src/historical_calibration.py \
-            --round both --windows 1:3,1:7,1:14,14:21 \
-            --out output_history_rounds
+            --round 2 --windows 1:3,1:7,1:14,14:21 \
+            --out output_history_rounds/round_2
       - name: Reproduce 9 October runoff nowcast using two historical windows
         run: |
           python src/runoff_nowcast.py \
@@ -68,7 +66,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: second-round-2026-10-09
+          name: second-round-only-2026-10-10
           path: |
             output_second_round/
             output_second_round_14_21/

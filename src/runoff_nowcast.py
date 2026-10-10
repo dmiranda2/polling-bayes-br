@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 
 from historical_calibration import parse_window_range, window_label
-from first_round_bias import apply_first_round_bias, read_first_round_bias, audit_calendar
+from runoff_calendar import audit_calendar
 from historical_second_round import (
     _effective_n, _norm_text, _random_effect_posterior,
     fit_historical_model, jackknife, load_results, loo_by_election,
@@ -214,23 +214,29 @@ def _candidate_pct(z: np.ndarray | float) -> np.ndarray | float:
 def estimate(surveys: pd.DataFrame, calibration: dict, as_of: str,
              draws: int = 30000, seed: int = 418,
              fallback_sd_pp: float = DEFAULT_EXTERNAL_SD_PP,
-             bias_mode: str = 'none', first_round_bias: pd.DataFrame | None = None,
-             aliases_path: str | Path = 'data/pollster_aliases.csv') -> tuple[pd.DataFrame, pd.DataFrame]:
+             bias_mode: str = 'second_round_history') -> tuple[pd.DataFrame, pd.DataFrame]:
     """Separate present polling consensus from a shared-error counterfactual.
 
     Distinct institute effects are adjusted only from historical second-round data.
     Their posterior uncertainty, sampling error, and poll noise are not conflated
     with the shock common to *all* companies in a new election.
     """
+    if bias_mode not in {"none", "second_round_history"}:
+        raise ValueError(f"Invalid second-round correction mode: {bias_mode}")
+    if calibration.get("historical_round", 2) != 2:
+        raise ValueError("Cannot apply first-round history to a second-round nowcast")
     fit = calibration.get("fit")
     source = calibration["status"]
-    mu = float(calibration["mu_ilr"])
+    apply_house = bias_mode == "second_round_history"
+    mu = float(calibration["mu_ilr"]) if apply_house and calibration.get("directional_mean_used", False) else 0.0
     common_sd = float(calibration["common_sd_ilr"])
     if not math.isfinite(common_sd):
         # For p near 1/2, z = log(p/(1-p))/sqrt(2); dp/dz = 1/(2sqrt(2)).
         common_sd = (float(fallback_sd_pp) / 100.0) * 2 * math.sqrt(2)
-    x = apply_first_round_bias(surveys, first_round_bias, mode=bias_mode, aliases_path=aliases_path)
+    x = surveys.copy()
     x["house_mean_ilr"] = 0.0
+    x["house_mean_applied_ilr"] = 0.0
+    x["historical_second_round_house_match"] = False
     x["house_sd_ilr"] = 0.0
     x["poll_noise_sd_ilr"] = float(calibration["tau_p_ilr"])
     hvars = []
@@ -240,9 +246,11 @@ def estimate(surveys: pd.DataFrame, calibration: dict, as_of: str,
         else:
             h_mean, h_var = _random_effect_posterior(fit, "pollster", r["pollster"])
         x.loc[idx, "house_mean_ilr"] = h_mean
+        x.loc[idx, "house_mean_applied_ilr"] = h_mean if apply_house else 0.0
+        x.loc[idx, "historical_second_round_house_match"] = bool(fit is not None and (_norm_text(r["pollster"]) == fit.pollsters).any())
         x.loc[idx, "house_sd_ilr"] = math.sqrt(max(h_var, 0.0))
         hvars.append(h_var)
-    x["adjusted_z_ilr"] = x["z_for_model_ilr"] - x["house_mean_ilr"]
+    x["adjusted_z_ilr"] = x["z_poll_ilr"] - x["house_mean_applied_ilr"]
     x["obs_var_ilr"] = (x["sampling_var_ilr"] + float(calibration["tau_p_ilr"]) ** 2
                         + np.asarray(hvars, dtype=float))
     # Time weighting is intentionally absent: after the first round there are
@@ -263,19 +271,20 @@ def estimate(surveys: pd.DataFrame, calibration: dict, as_of: str,
         }
     polling = interval(p_poll)
     possible = interval(p_election)
-    coverage = 100.0 * float(w @ x['first_round_bias_available'].astype(float).to_numpy()) / float(w.sum())
-    applied = 100.0 * float(w @ x['first_round_bias_applied'].astype(float).to_numpy()) / float(w.sum())
+    house_mask = x["historical_second_round_house_match"].to_numpy(bool)
+    coverage = 100.0 * float(w @ house_mask.astype(float) / w.sum())
     row = {
         "bias_mode": bias_mode,
-        "first_round_bias_source": 'user_supplied_2026-10-10' if bias_mode != 'none' else 'not_applied',
-        "n_bias_available": int(x['first_round_bias_available'].sum()),
-        "n_bias_applied": int(x['first_round_bias_applied'].sum()),
-        "bias_available_weight_pct": coverage,
-        "bias_applied_weight_pct": applied,
+        "bias_source": "second_round_history_only" if apply_house else "none",
+        "n_house_effects_matched": int(house_mask.sum()),
+        "n_house_effects_applied": int(house_mask.sum()) if apply_house else 0,
+        "house_weight_covered_pct": coverage,
+        "mean_house_shift_applied_ilr": float(w @ x["house_mean_applied_ilr"].to_numpy(float) / w.sum()),
+        "mean_common_shift_applied_ilr": mu,
         "as_of": as_of, "scenario": "mixed_atlas_included" if x["is_mixed_field"].any() else "strict_post_first_round",
         "n_surveys": int(len(x)), "last_field_end": str(x["field_end"].max()),
         "bias_calibration_status": source,
-        "directional_mean_used": bool(calibration["directional_mean_used"]),
+        "directional_mean_used": bool(apply_house and calibration["directional_mean_used"]),
         "polling_lula_pct": polling["median"], "polling_flavio_pct": 100 - polling["median"],
         "polling_lula_lo80": polling["lo80"], "polling_lula_hi80": polling["hi80"],
         "polling_lula_lo95": polling["lo95"], "polling_lula_hi95": polling["hi95"],
@@ -289,12 +298,13 @@ def estimate(surveys: pd.DataFrame, calibration: dict, as_of: str,
         "historical_mu_poll_minus_urn_ilr": mu,
         "assumption": "If election occurred today; not a 25-Oct-2026 forecast",
     }
+    x["bias_mode"] = bias_mode
     return pd.DataFrame([row]), x
 
 
 def _format_result_table(result: pd.DataFrame) -> list[str]:
     lines = [
-        "| Seleção | N | Lula pesquisas (%) | Flávio pesquisas (%) | Lula, se urna hoje: mediana [80%] | Viés 1T aplicado (peso) |",
+        "| Cenário | N | Lula consenso (%) | Flávio consenso (%) | Lula, urna hipotética hoje [IC80%] | Institutos ajustados (2T) |",
         "|---|---:|---:|---:|---:|---:|",
     ]
     for r in result.itertuples(index=False):
@@ -302,92 +312,73 @@ def _format_result_table(result: pd.DataFrame) -> list[str]:
             f"| {r.scenario} | {r.n_surveys} | {r.polling_lula_pct:.2f} | "
             f"{r.polling_flavio_pct:.2f} | {r.counterfactual_lula_pct:.2f} "
             f"[{r.counterfactual_lula_lo80:.2f}, {r.counterfactual_lula_hi80:.2f}] | "
-            f"{r.bias_applied_weight_pct:.1f}% |"
+            f"{r.n_house_effects_applied} |"
         )
     return lines
 
 
 def _separate_report(part: pd.DataFrame, mode: str, calib: dict,
                      as_of: str, used: pd.DataFrame, calendar: pd.DataFrame) -> str:
-    title = ("SEM correção do viés do 1º turno" if mode == "none"
-             else "COM correção mecânica do viés do 1º turno")
+    corrected = mode == "second_round_history"
     lines = [
-        f"# Segundo turno de 2026 — {title} — {as_of}", "",
-        "Lula × Flávio Bolsonaro; percentual de votos válidos. **Nowcast**, não previsão de 25/10.", "",
-        f"Calibração histórica de segundo turno: **{calib['status']}**; "
-        f"média direcional histórica aplicada: **{calib['directional_mean_used']}**.", "",
-        "Correção de viés 1T: " + (
-            "NÃO aplicada. Todas as pesquisas permanecem nas percentagens publicadas."
-            if mode == "none" else
-            "Aplicada por instituto: a margem (Flávio − Lula) do 2º turno é reduzida "
-            "pelo erro da mesma margem no 1º turno informado no calendário de 10/10; "
-            "apenas institutos com viés identificado são ajustados."
-        ), "",
+        f"# Segundo turno — {'com correção histórica 2T' if corrected else 'sem correção'} — {as_of}",
+        "",
+        "Nowcast Lula × Flávio Bolsonaro (votos válidos). Não é previsão de 25/10.",
+        "Histórico do viés: SOMENTE pesquisas e urnas de segundo turno.",
+        f"Status: {calib['status']}; janela histórica {calib['historical_window_range']}.",
+        f"Média direcional comum aplicada: {corrected and calib['directional_mean_used']}.",
+        "",
     ]
-    lines.extend(_format_result_table(part))
-    lines.extend(["", "As duas versões usam os MESMOS levantamentos, pesos amostrais, "
-                      "incerteza de institutos e modelo histórico de 2º turno. "
-                      "As faixas do cenário ajustado são condicionais à transferência "
-                      "do erro de 1º turno, cuja estabilidade NÃO foi demonstrada.", ""])
-    if mode != "none":
-        for r in part.itertuples(index=False):
-            x = used[(used["scenario"] == r.scenario) & (used["bias_mode"] == mode)]
-            missing = sorted(x.loc[~x["first_round_bias_available"], "pollster"].unique().tolist())
-            lines.append(
-                f"- {r.scenario}: {r.n_bias_applied}/{r.n_surveys} pesquisas ajustadas; "
-                f"cobertura em peso {r.bias_applied_weight_pct:.1f}%; "
-                f"sem referência de viés: {', '.join(missing) if missing else 'nenhuma'}."
-            )
-    lines.extend([
-        "", "## Qualidade do calendário (não incorporado como resultado)", "",
-        f"- {int((calendar['scope'] == 'national').sum())} registros nacionais programados; "
-        f"{int((calendar['scope'] == 'regional').sum())} regionais.",
-        f"- {int(calendar['date_conflict'].sum())} inconsistências entre campo e publicação prevista.",
-        "- Registros futuros e percentagens antigas citadas no calendário NÃO entram no ajuste; "
-        "somente pesquisas de 2º turno efetivamente publicadas e presentes em "
-        "data/manual_second_round_2026.csv podem entrar.",
-        "- Principal: campo inteiramente posterior ao 1º turno. "
-        "Atlas (campo iniciado em 03/10) aparece somente como sensibilidade.",
-        "", "## Fontes e auditoria", "",
-        f"- Histórico: janela {calib['historical_window_range']} de segundo turno; "
-        f"status {calib['status']}.",
-        f"- Datas de referência e pesquisas selecionadas: polls_used_{as_of}.csv.",
-        "- Erros 1T fornecidos pelo usuário em 10/10/2026, ainda não verificados em registro externo.",
-    ])
+    lines += _format_result_table(part)
+    lines += [
+        "", "As duas versões usam as MESMAS pesquisas e as MESMAS variâncias; "
+        "somente a estimativa de efeito histórico de instituto (e a média comum "
+        "se passar pelo LOO) pode mudar o centro.", "",
+    ]
+    for r in part.itertuples(index=False):
+        g = used[(used["scenario"] == r.scenario) & (used["bias_mode"] == mode)]
+        unknown = sorted(g.loc[~g["historical_second_round_house_match"], "pollster"].unique().tolist())
+        lines.append(
+            f"- {r.scenario}: {r.n_house_effects_matched}/{r.n_surveys} institutos identificáveis "
+            f"no histórico de 2T; peso {r.house_weight_covered_pct:.1f}%; "
+            f"sem histórico: {', '.join(unknown) if unknown else 'nenhum'}."
+        )
+    lines += [
+        "", "O erro comum histórico só ajusta direção quando validado por eleição inteira.",
+        "Os ajustes de instituto são estimativas regularizadas; estabilidade não é garantida.",
+        f"Calendário: {len(calendar)} registros programados, "
+        f"{int(calendar['date_conflict'].sum())} conflitos de datas.",
+        "Nenhum registro agendado ou dado de primeiro turno entra no nowcast.",
+        "Atlas, cuja coleta iniciou antes de 04/10, entra apenas na sensibilidade.",
+    ]
     return "\n".join(lines) + "\n"
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Audited two-candidate second-round polling nowcast")
+    p = argparse.ArgumentParser(description="Second-round-only corrected and uncorrected nowcasts")
     p.add_argument("--polls", default="data/manual_second_round_2026.csv")
     p.add_argument("--history", default="output_second_round_bias/historical_poll_errors.csv")
     p.add_argument("--results", default="data/presidential_second_round_results.csv")
-    p.add_argument("--historical-window", default="1:7", help="Historical days-before window: 1:7, 14:21, etc.")
-    p.add_argument("--as-of", default=None, help="YYYY-MM-DD; defaults to current date")
+    p.add_argument("--historical-window", default="1:7")
+    p.add_argument("--as-of", default=None)
     p.add_argument("--out", default="output_second_round")
     p.add_argument("--draws", type=int, default=30000)
-    p.add_argument("--first-round-bias", default="data/first_round_pollster_bias_2026.csv")
-    p.add_argument("--aliases", default="data/pollster_aliases.csv")
     p.add_argument("--calendar", default="data/scheduled_polls_2026_10_10.csv")
-    p.add_argument("--bias-modes", choices=["both", "none", "first_round_2026"], default="both",
-                   help="Default: produce BOTH uncorrected and 2026-first-round-corrected results.")
+    p.add_argument("--bias-modes", choices=["both", "none", "second_round_history"], default="both")
     a = p.parse_args()
     as_of = a.as_of or pd.Timestamp.today().date().isoformat()
     outdir = Path(a.out)
     outdir.mkdir(parents=True, exist_ok=True)
     calib = _calibrate_historical(a.history, a.results, a.historical_window)
-    bias_table = read_first_round_bias(a.first_round_bias, aliases_path=a.aliases)
     calendar = audit_calendar(a.calendar)
     calendar.to_csv(outdir / f"calendar_audit_{as_of}.csv", index=False)
-    modes = ["none", "first_round_2026"] if a.bias_modes == "both" else [a.bias_modes]
+    modes = ["none", "second_round_history"] if a.bias_modes == "both" else [a.bias_modes]
     outcomes, inputs = [], []
     for mixed in (False, True):
-        polls = read_current_polls(a.polls, as_of, include_mixed=mixed)
+        surveys = read_current_polls(a.polls, as_of, include_mixed=mixed)
         for mode in modes:
-            row, used = estimate(
-                polls, calib, as_of, draws=a.draws, seed=418,
-                bias_mode=mode, first_round_bias=bias_table, aliases_path=a.aliases,
-            )
+            row, used = estimate(surveys, calib, as_of, draws=a.draws, seed=418,
+                                 bias_mode=mode)
             outcomes.append(row)
             used["scenario"] = row["scenario"].iloc[0]
             inputs.append(used)
@@ -396,48 +387,35 @@ def main() -> None:
     result.to_csv(outdir / f"nowcast_{as_of}.csv", index=False)
     used.to_csv(outdir / f"polls_used_{as_of}.csv", index=False)
     for mode in modes:
-        label = "uncorrected" if mode == "none" else "first_round_corrected"
-        part = result[result["bias_mode"] == mode].copy()
+        label = "uncorrected" if mode == "none" else "second_round_corrected"
+        part = result[result["bias_mode"] == mode]
         part.to_csv(outdir / f"nowcast_{label}_{as_of}.csv", index=False)
         (outdir / f"report_{label}_{as_of}.md").write_text(
             _separate_report(part, mode, calib, as_of, used, calendar), encoding="utf-8"
         )
     audit = {k: v for k, v in calib.items() if k != "fit"}
-    audit.update({
-        "as_of": as_of,
-        "historical_data_origin": "SECOND-ROUND polls only (2002-2022)",
-        "historical_window_range": window_label(parse_window_range(a.historical_window)),
-        "first_round_bias_reference": "user-supplied 10 Oct 2026; margin F-L; sensitivity only",
-        "first_round_bias_modes": modes,
-        "first_round_bias_missing_institute_policy": "unchanged; flagged in polls_used",
-        "calendar_registration_count": len(calendar),
-        "calendar_date_conflicts": calendar.loc[calendar["date_conflict"], "poll_id"].tolist(),
-    })
+    audit["as_of"] = as_of
+    audit["bias_modes"] = modes
+    audit["historical_data_origin"] = "SECOND ROUND ONLY"
+    audit["first_round_bias_transfer"] = "DISABLED"
+    audit["calendar_date_conflicts"] = calendar.loc[calendar["date_conflict"], "poll_id"].tolist()
     (outdir / f"bias_audit_{as_of}.json").write_text(
         json.dumps(audit, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8"
     )
     lines = [
-        f"# Segundo turno — dois nowcasts de {as_of}", "",
-        "Confronto Lula × Flávio Bolsonaro (votos válidos). "
-        "A primeira versão **não** corrige viés de 1º turno; "
-        "a segunda o transfere como hipótese de sensibilidade.", "",
+        f"# Segundo turno — duas versões — {as_of}", "",
+        "Somente pesquisas de segundo turno; nenhuma correção de primeiro turno.",
+        "Sem correção mantém o consenso publicado; com correção usa exclusivamente "
+        "os efeitos aprendidos de segundos turnos históricos.", "",
     ]
     for mode in modes:
-        lines += ["## " + ("Sem correção do viés do 1º turno" if mode == "none"
-                         else "Com correção do viés do 1º turno"),
-                  ""]
+        lines += ["## " + ("Sem correção" if mode == "none" else "Com histórico 2T"), ""]
         lines += _format_result_table(result[result["bias_mode"] == mode])
         lines += [""]
     lines += [
-        "O resultado principal exclui pesquisas cujo campo começou antes de 04/10; "
-        "a segunda seleção inclui Atlas apenas como sensibilidade.",
-        "Não há resultados posteriores à data de referência incorporados.",
-        "**Não é previsão do resultado em 25/10/2026.**",
-        "Os intervalos corrigidos não incluem incerteza adicional sobre transportar "
-        "um viés de 1º turno para 2º turno.",
-        "", f"Calendário: {int(calendar['date_conflict'].sum())} registros com conflito de datas "
-        f"(veja calendar_audit_{as_of}.csv).", "",
-        f"Histórico de segundo turno: {calib['status']}, janela {calib['historical_window_range']}.",
+        f"Média histórica comum direcional validada: {calib['directional_mean_used']}.",
+        "Atlas aparece apenas como sensibilidade por campo misto.",
+        "**Não é previsão do resultado de 25/10/2026.**", "",
     ]
     (outdir / f"report_{as_of}.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(result.to_string(index=False, float_format=lambda v: f"{v:.4f}"))
