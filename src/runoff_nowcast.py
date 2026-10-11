@@ -352,8 +352,9 @@ def estimate(surveys: pd.DataFrame, calibration: dict, as_of: str,
 
 
 def _format_result_table(result: pd.DataFrame) -> list[str]:
+    """Always distinguish observed-poll consensus from conditional sensitivities."""
     lines = [
-        "| Cenário | N | Lula consenso (%) | Flávio consenso (%) | Lula, urna hipotética hoje [IC80%] | Institutos ajustados (2T) |",
+        "| Seleção | N | Lula: pesquisas (%) | Flávio: pesquisas (%) | Lula: cenário condicionado ao erro comum [IC80%] | Deslocamento comum ILR |",
         "|---|---:|---:|---:|---:|---:|",
     ]
     for r in result.itertuples(index=False):
@@ -361,44 +362,101 @@ def _format_result_table(result: pd.DataFrame) -> list[str]:
             f"| {r.scenario} | {r.n_surveys} | {r.polling_lula_pct:.2f} | "
             f"{r.polling_flavio_pct:.2f} | {r.counterfactual_lula_pct:.2f} "
             f"[{r.counterfactual_lula_lo80:.2f}, {r.counterfactual_lula_hi80:.2f}] | "
-            f"{r.n_house_effects_applied} |"
+            f"{r.mean_common_shift_applied_ilr:+.5f} |"
         )
     return lines
 
 
+def _historical_evidence_table(calib: dict) -> list[str]:
+    years = calib.get("historical_election_poll_minus_urn", [])
+    if not years:
+        return ["Não há nesta execução dados suficientes para a tabela histórica."]
+    lines = [
+        "| Segundo turno | Institutos | PT: pesquisa menos urna (p.p.) |",
+        "|---|---:|---:|",
+    ]
+    for y in years:
+        lines.append(
+            f"| {y['election_year']} | {y['n_pollsters']} | "
+            f"{y['pt_poll_minus_urn_pp']:+.2f} |"
+        )
+    return lines
+
+
+def _historical_validation_lines(calib: dict) -> list[str]:
+    return [
+        f"- Média histórica livre ILR: {calib.get('free_mu_ilr')}.",
+        f"- Erro padrão da média livre ILR: {calib.get('free_mu_sd_ilr')}.",
+        f"- Logscore LOO da média livre: {calib.get('loo_free_logscore')}.",
+        f"- Logscore LOO da média zero: {calib.get('loo_zero_logscore')}.",
+        f"- Logscore LOO do prior externo: {calib.get('loo_baseline_2p5_logscore')}.",
+        f"- Média direcional comum aceita no principal: "
+        f"{bool(calib.get('directional_mean_used', False))}.",
+        f"- Status da calibração: {calib['status']}.",
+    ]
+
+
 def _separate_report(part: pd.DataFrame, mode: str, calib: dict,
                      as_of: str, used: pd.DataFrame, calendar: pd.DataFrame) -> str:
-    corrected = mode == "second_round_history"
+    experimental = mode == "experimental_free_mean_2t"
+    accepted = mode == "second_round_history"
+    title = ("EXPERIMENTAL — média livre 2T, não validada" if experimental
+             else "com ajustes históricos aceitos 2T" if accepted
+             else "sem correção histórica")
     lines = [
-        f"# Segundo turno — {'com correção histórica 2T' if corrected else 'sem correção'} — {as_of}",
-        "",
-        "Nowcast Lula × Flávio Bolsonaro (votos válidos). Não é previsão de 25/10.",
-        "Histórico do viés: SOMENTE pesquisas e urnas de segundo turno.",
-        f"Status: {calib['status']}; janela histórica {calib['historical_window_range']}.",
-        f"Média direcional comum aplicada: {corrected and calib['directional_mean_used']}.",
-        "",
+        f"# Segundo turno — {title} — {as_of}", "",
+        "Lula × Flávio Bolsonaro, votos válidos. **Não é previsão de 25/10.**",
+        "Histórico: exclusivamente pesquisas e resultados de SEGUNDO turno.",
+        f"Janela histórica: {calib['historical_window_range']}.", "",
     ]
+    if experimental:
+        lines += [
+            "**ALERTA: A MÉDIA LIVRE NÃO PASSOU NA VALIDAÇÃO LEAVE-ONE-ELECTION-OUT.**",
+            "A correção é mostrada apenas para preservar informação como sensibilidade,",
+            "sem elevar sua confiabilidade ou promovê-la ao cenário principal.",
+            "Ela altera apenas o cenário condicional ao erro comum histórico; a",
+            "estimativa do CONSENSO das pesquisas fica exatamente igual ao modo",
+            "de ajustes históricos aceitos. A incerteza estimada de mu é adicionada",
+            "em quadratura ao desvio-padrão do erro comum da eleição.", "",
+        ]
+    elif accepted:
+        lines += [
+            "Ajustes regularizados de instituto estimados em SEGUNDOS turnos passados.",
+            "Média comum histórica só é usada se vencer o backtest predefinido.", "",
+        ]
+    else:
+        lines += ["O centro das pesquisas permanece sem ajustes de instituto ou viés.", ""]
     lines += _format_result_table(part)
-    lines += [
-        "", "As duas versões usam as MESMAS pesquisas e as MESMAS variâncias; "
-        "somente a estimativa de efeito histórico de instituto (e a média comum "
-        "se passar pelo LOO) pode mudar o centro.", "",
-    ]
     for r in part.itertuples(index=False):
-        g = used[(used["scenario"] == r.scenario) & (used["bias_mode"] == mode)]
-        unknown = sorted(g.loc[~g["historical_second_round_house_match"], "pollster"].unique().tolist())
+        filtered = used[(used["scenario"] == r.scenario) & (used["bias_mode"] == mode)]
+        missing = sorted(filtered.loc[
+            ~filtered["historical_second_round_house_match"], "pollster"
+        ].unique().tolist())
         lines.append(
-            f"- {r.scenario}: {r.n_house_effects_matched}/{r.n_surveys} institutos identificáveis "
-            f"no histórico de 2T; peso {r.house_weight_covered_pct:.1f}%; "
-            f"sem histórico: {', '.join(unknown) if unknown else 'nenhum'}."
+            f"- {r.scenario}: {r.n_house_effects_matched}/{r.n_surveys} institutos "
+            f"com histórico de 2T (peso {r.house_weight_covered_pct:.1f}%); "
+            f"sem correspondência: {', '.join(missing) if missing else 'nenhum'}."
         )
     lines += [
-        "", "O erro comum histórico só ajusta direção quando validado por eleição inteira.",
-        "Os ajustes de instituto são estimativas regularizadas; estabilidade não é garantida.",
-        f"Calendário: {len(calendar)} registros programados, "
-        f"{int(calendar['date_conflict'].sum())} conflitos de datas.",
-        "Nenhum registro agendado ou dado de primeiro turno entra no nowcast.",
-        "Atlas, cuja coleta iniciou antes de 04/10, entra apenas na sensibilidade.",
+        "", "## Histórico descritivo por eleição — não prova viés permanente", "",
+    ]
+    lines += _historical_evidence_table(calib)
+    lines += [
+        "", "Comparações de sondagens realizadas antes da votação com a urna final",
+        "misturam erros das pesquisas e possíveis mudanças reais do eleitorado.",
+        "", "## Validação histórica por eleição inteira", "",
+    ]
+    lines += _historical_validation_lines(calib)
+    lines += [
+        "", "## Limitações", "",
+        "- Nenhum erro do primeiro turno de 2026 é transportado para este modelo.",
+        "- Nenhuma sondagem futura ou estadual entra no agregado nacional.",
+        "- Atlas, cuja coleta começou antes da votação de 04/10, permanece",
+        "  apenas como sensibilidade, não na seleção principal.",
+        f"- {len(calendar)} registros no calendário; "
+        f"{int(calendar['date_conflict'].sum())} datas conflitantes.",
+        "- Os intervalos são condicionais à hipótese escolhida e não são",
+        "  probabilidades de vitória nem previsões do resultado de 25/10.",
     ]
     return "\n".join(lines) + "\n"
 
@@ -413,7 +471,12 @@ def main() -> None:
     p.add_argument("--out", default="output_second_round")
     p.add_argument("--draws", type=int, default=30000)
     p.add_argument("--calendar", default="data/scheduled_polls_2026_10_10.csv")
-    p.add_argument("--bias-modes", choices=["both", "none", "second_round_history"], default="both")
+    p.add_argument(
+        "--bias-modes",
+        choices=["all", "both", "none", "second_round_history", "experimental_free_mean_2t"],
+        default="all",
+        help="all: three results including the UNVALIDATED free historical mean; both: prior two modes",
+    )
     a = p.parse_args()
     as_of = a.as_of or pd.Timestamp.today().date().isoformat()
     outdir = Path(a.out)
@@ -421,7 +484,20 @@ def main() -> None:
     calib = _calibrate_historical(a.history, a.results, a.historical_window)
     calendar = audit_calendar(a.calendar)
     calendar.to_csv(outdir / f"calendar_audit_{as_of}.csv", index=False)
-    modes = ["none", "second_round_history"] if a.bias_modes == "both" else [a.bias_modes]
+    modes = (
+        ["none", "second_round_history", "experimental_free_mean_2t"]
+        if a.bias_modes == "all" else
+        ["none", "second_round_history"] if a.bias_modes == "both" else
+        [a.bias_modes]
+    )
+    if "experimental_free_mean_2t" in modes and calib.get("free_mu_ilr") is None:
+        if a.bias_modes == "all":
+            modes.remove("experimental_free_mean_2t")
+            calib["reasons"].append(
+                "experimental free mean omitted: insufficient auditable second-round history"
+            )
+        else:
+            raise ValueError("Experimental free mean unavailable for selected window")
     outcomes, inputs = [], []
     for mixed in (False, True):
         surveys = read_current_polls(a.polls, as_of, include_mixed=mixed)
@@ -436,7 +512,11 @@ def main() -> None:
     result.to_csv(outdir / f"nowcast_{as_of}.csv", index=False)
     used.to_csv(outdir / f"polls_used_{as_of}.csv", index=False)
     for mode in modes:
-        label = "uncorrected" if mode == "none" else "second_round_corrected"
+        label = {
+            "none": "uncorrected",
+            "second_round_history": "second_round_corrected",
+            "experimental_free_mean_2t": "second_round_free_mean_experimental",
+        }[mode]
         part = result[result["bias_mode"] == mode]
         part.to_csv(outdir / f"nowcast_{label}_{as_of}.csv", index=False)
         (outdir / f"report_{label}_{as_of}.md").write_text(
@@ -445,6 +525,7 @@ def main() -> None:
     audit = {k: v for k, v in calib.items() if k != "fit"}
     audit["as_of"] = as_of
     audit["bias_modes"] = modes
+    audit["experimental_mode_is_primary"] = False
     audit["historical_data_origin"] = "SECOND ROUND ONLY"
     audit["first_round_bias_transfer"] = "DISABLED"
     audit["calendar_date_conflicts"] = calendar.loc[calendar["date_conflict"], "poll_id"].tolist()
@@ -452,19 +533,44 @@ def main() -> None:
         json.dumps(audit, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8"
     )
     lines = [
-        f"# Segundo turno — duas versões — {as_of}", "",
-        "Somente pesquisas de segundo turno; nenhuma correção de primeiro turno.",
-        "Sem correção mantém o consenso publicado; com correção usa exclusivamente "
-        "os efeitos aprendidos de segundos turnos históricos.", "",
+        f"# Segundo turno — três leituras históricas — {as_of}", "",
+        "Lula × Flávio Bolsonaro, votos válidos. Somente dados de SEGUNDO turno.",
+        "**Não são previsões do resultado de 25/10.**", "",
+        "Os mesmos levantamentos, pesos de precisão e efeitos regulares de",
+        "instituto separam os modelos. Só o terceiro cenário inclui a média",
+        "direcional histórica comum mesmo quando ela perde no backtest.", "",
     ]
+    labels = {
+        "none": "Sem correção",
+        "second_round_history": "Correção histórica aceita",
+        "experimental_free_mean_2t": "EXPERIMENTAL — média direcional livre, NÃO VALIDADA",
+    }
     for mode in modes:
-        lines += ["## " + ("Sem correção" if mode == "none" else "Com histórico 2T"), ""]
+        lines += [f"## {labels[mode]}", ""]
         lines += _format_result_table(result[result["bias_mode"] == mode])
-        lines += [""]
+        lines.append("")
     lines += [
-        f"Média histórica comum direcional validada: {calib['directional_mean_used']}.",
-        "Atlas aparece apenas como sensibilidade por campo misto.",
-        "**Não é previsão do resultado de 25/10/2026.**", "",
+        "O consenso latente das pesquisas NÃO é deslocado pela média livre.",
+        "Ela altera apenas o cenário condicional ao erro comum da eleição.",
+        "No terceiro modo, também propagamos a incerteza da média histórica.", "",
+        f"## Desvios históricos do PT: pesquisa menos urna "
+        f"({calib['historical_window_range']} dias antes da eleição)", "",
+    ]
+    lines += _historical_evidence_table(calib)
+    lines += [
+        "", "A diferença entre a pesquisa pré-eleitoral e a urna inclui potencial",
+        "mudança genuína da intenção de voto durante a campanha. Não podemos",
+        "interpretá-la automaticamente como erro persistente de instituto.", "",
+        "## Por que a média histórica não foi adotada no cenário principal?", "",
+    ]
+    lines += _historical_validation_lines(calib)
+    lines += [
+        "", "A estimativa livre foi preservada, com sinal, magnitude e erro padrão,",
+        "mas continua distinguida dos modelos aceitos. Um acerto isolado não",
+        "se sobrepõe à validação por eleição inteira.", "",
+        "Atlas entra apenas como sensibilidade por coleta iniciada antes de 04/10.",
+        f"Calendário: {int(calendar['date_conflict'].sum())} inconsistências de datas.",
+        "Nenhum dado do primeiro turno ou pesquisa futura é usado.", "",
     ]
     (outdir / f"report_{as_of}.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(result.to_string(index=False, float_format=lambda v: f"{v:.4f}"))
