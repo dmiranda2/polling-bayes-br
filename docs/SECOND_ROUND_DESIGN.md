@@ -116,3 +116,70 @@ O programa grava:
 - polls_used_2026-10-10.csv, bias_audit_2026-10-10.json e calendar_audit_2026-10-10.csv para auditoria.
 
 **Nenhuma versão constitui previsão do resultado de 25 de outubro de 2026.**
+
+## Terceiro cenário: preservar o sinal histórico não validado (10/10/2026)
+
+A média comum direcional aprendida com pesquisas e urnas de SEGUNDOS turnos
+anteriores permanece uma informação estatística, mesmo quando sua aplicação
+automática perde na validação histórica. Por isso o script preserva agora
+três modos, sem alterar a série principal:
+
+1. none — nenhuma correção histórica no centro da média das pesquisas.
+2. second_round_history — ajustes regulares de instituto, com média comum
+   direcional somente se aprovada nos critérios LOO por eleição inteira.
+3. experimental_free_mean_2t — mantém os mesmos levantamentos e efeitos
+   regulares de instituto do segundo modo, mas aplica a média histórica livre
+   na camada de sensibilidade condicionada ao erro comum, ainda quando rejeitada
+   no LOO. ESTE MODO É EXPLORATÓRIO E NÃO É A ESTIMATIVA PRINCIPAL.
+
+No terceiro modo o consenso latente das pesquisas não muda em relação ao
+segundo: somente a distribuição condicional ao erro histórico é deslocada.
+A direção utilizada é a de PT menos adversário, com erro definido como
+pesquisa menos urna. Na coordenada ILR:
+
+    z_condicional = z_consenso - mu_livre - erro_comum
+
+O modelo experimental inclui a incerteza da própria média histórica, e não
+somente um deslocamento fixo. Quando a média foi rejeitada e o erro externo
+de eleição é mantido, usa-se a soma de variâncias
+
+    var_condicional_comum = var_prior_comum + var(mu_livre).
+
+É uma análise de sensibilidade Gaussiana condicional, NÃO um intervalo
+preditivo validado para o resultado de 25 de outubro.
+
+Na janela histórica de 14 a 21 dias antes da urna (adequada à posição
+temporal do nowcast de 10 de outubro) há 23 levantamentos de quatro
+segundos turnos. A média livre no espaço ILR é -0,0639858, com erro padrão
+0,042525. Em uma disputa próxima de 50%-50%, o sinal equivale a cerca de
+2,26 pontos percentuais de subestimação da participação do PT nas pesquisas.
+
+Esses dados foram rejeitados para correção automática:
+logscore LOO histórico da média livre = 1,69; média zero = 3,58;
+prior externo = 4,05 (maior é melhor). A média livre, seu erro padrão,
+os critérios LOO e os desvios observados em cada segundo turno aparecem
+no relatório e na auditoria JSON, em vez de serem apagados.
+
+ATENÇÃO: comparar sondagens feitas duas a três semanas antes da eleição
+com o resultado final mistura viés de medição e mudanças genuínas de
+preferências durante a campanha. Apenas quatro eleições históricas da
+janela são observáveis. Não se trata de uma estimativa bem validada
+de erro que necessariamente se repetirá em 2026.
+
+### Execução e compatibilidade
+
+    python src/runoff_nowcast.py --as-of 2026-10-10 --historical-window 14:21 --bias-modes all
+
+O modo all (padrão) grava os três CSVs e seus relatórios individuais,
+além da comparação única report_2026-10-10.md e da auditoria
+bias_audit_2026-10-10.json. O arquivo adicional recebe o nome
+nowcast_second_round_free_mean_experimental_2026-10-10.csv e seu
+relatório report_second_round_free_mean_experimental_2026-10-10.md.
+
+Para manter as duas saídas antigas, use --bias-modes both. Quando não
+existe histórico suficientemente auditável, o programa omite o terceiro
+modo no comando all e registra a razão; não inventa média histórica.
+O comando explícito para o terceiro modo exige histórico válido.
+Nunca combina pesquisas de primeiro e segundo turnos.
+
+As estimativas das pesquisas não são previsões de urna em 25/10/2026.

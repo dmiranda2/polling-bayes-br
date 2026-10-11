@@ -35,14 +35,14 @@ jobs:
       - name: Dependencies
         run: |
           pip install -r requirements.txt pytest tabulate
-      - name: Regression tests, including first-round model
+      - name: Regression tests for both established modes and historical free-mean sensitivity
         run: PYTHONPATH=src pytest -q
       - name: Calibrate second-round history ONLY
         run: |
           python src/historical_calibration.py \
             --round 2 --windows 1:3,1:7,1:14,14:21 \
             --out output_history_rounds/round_2
-      - name: Reproduce 9 October runoff nowcast using two historical windows
+      - name: Reproduce 9 and 10 October with three second-round scenarios
         run: |
           python src/runoff_nowcast.py \
             --as-of 2026-10-09 \
@@ -62,11 +62,14 @@ jobs:
             --historical-window 14:21 \
             --out output_second_round_2026_10_10
           cat output_second_round_2026_10_10/report_2026-10-10.md
+          test -s output_second_round_2026_10_10/nowcast_second_round_free_mean_experimental_2026-10-10.csv
+          test -s output_second_round_2026_10_10/report_second_round_free_mean_experimental_2026-10-10.md
+          python -c "import pandas as pd; x=pd.read_csv('output_second_round_2026_10_10/nowcast_2026-10-10.csv'); assert set(x.bias_mode)=={'none','second_round_history','experimental_free_mean_2t'}; assert len(x)==6"
       - name: Upload complete audit and estimates
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: second-round-only-2026-10-10
+          name: second-round-three-modes-2026-10-10
           path: |
             output_second_round/
             output_second_round_14_21/

@@ -1,12 +1,12 @@
-> **Atualização de 10/10/2026 — duas versões do segundo turno:**
-> O pipeline entrega o consenso de pesquisas sem deslocamento de viés e
-> separadamente o consenso com ajustes aprendidos EXCLUSIVAMENTE do histórico
-> de pesquisas e urnas de SEGUNDOS turnos anteriores. Não utiliza o erro
-> observado no primeiro turno de 2026 para corrigir o segundo.
-> Os registros de futuras pesquisas são apenas um calendário, nunca resultados.
-> A média direcional histórica comum continua sujeita à validação por eleição.
+> **Atualização de 10/10/2026 — três leituras do segundo turno:**
+> O pipeline mantém as estimativas sem correção, com correção histórica aceita,
+> e uma sensibilidade EXPERIMENTAL com a média direcional livre de SEGUNDOS
+> turnos anteriores, mesmo quando rejeitada no backtest. A terceira saída não
+> substitui a estimativa principal: preserva o sinal, o erro padrão e o LOO.
+> O calendário contém apenas metadados, nunca futuros resultados; nenhum erro
+> de primeiro turno de 2026 é transferido ao segundo.
 >
-> Execução: python src/runoff_nowcast.py --as-of 2026-10-10 --historical-window 14:21 --bias-modes both
+> Execução: python src/runoff_nowcast.py --as-of 2026-10-10 --historical-window 14:21 --bias-modes all
 >
 # polling-bayes-br
 
