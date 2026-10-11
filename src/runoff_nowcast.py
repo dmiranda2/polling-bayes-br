@@ -101,6 +101,8 @@ def _calibrate_historical(error_path: str | Path, results_path: str | Path,
         "historical_window_range": selected_window,
         "status": "external_fallback", "directional_mean_used": False,
         "mu_ilr": 0.0, "var_mu_ilr": 0.0,
+        "free_mu_ilr": None, "free_mu_sd_ilr": None, "free_mu_var_ilr": None,
+        "historical_election_poll_minus_urn": [],
         "common_sd_ilr": DEFAULT_EXTERNAL_SD_PP / 100.0 * 2 * math.sqrt(2), "tau_h_ilr": 0.0, "tau_p_ilr": 0.0,
         "reasons": [], "fit": None,
     }
@@ -117,6 +119,31 @@ def _calibrate_historical(error_path: str | Path, results_path: str | Path,
         info["reasons"].append("historical file contains first-round or mixed-round polls")
         return info
     x = e[e["window_days"].eq(far) & e["window_min_days"].eq(near)].copy()
+    # Keep descriptive PT polling errors by election even if model-selection
+    # rejects a directional mean. Poll-to-final differences may reflect
+    # campaigning movement as well as survey bias.
+    expected = {"ref_poll_pct", "opp_poll_pct", "ref_result_pct",
+                "pair_error_ilr", "sampling_var_ilr"}
+    if expected <= set(x.columns):
+        entries = []
+        for year, group in x.groupby("election_year", sort=True):
+            pair_total = (group["ref_poll_pct"] + group["opp_poll_pct"]).to_numpy(float)
+            sampling_var = group["sampling_var_ilr"].to_numpy(float)
+            if not (np.all(pair_total > 0) and np.all(sampling_var > 0)
+                    and np.isfinite(pair_total).all() and np.isfinite(sampling_var).all()):
+                continue
+            weights = 1 / sampling_var
+            errors_pp = (
+                100 * group["ref_poll_pct"].to_numpy(float) / pair_total
+                - group["ref_result_pct"].to_numpy(float)
+            )
+            entries.append({
+                "election_year": int(year),
+                "n_pollsters": int(len(group)),
+                "pt_poll_minus_urn_pp": float(np.average(errors_pp, weights=weights)),
+                "pair_error_ilr": float(np.average(group["pair_error_ilr"], weights=weights)),
+            })
+        info["historical_election_poll_minus_urn"] = entries
     if x["election_year"].nunique() < 4 or len(x) < 12:
         info["reasons"].append(
             "insufficient history for window " + selected_window +
@@ -150,6 +177,8 @@ def _calibrate_historical(error_path: str | Path, results_path: str | Path,
         "jackknife_mu_min": float(jk["mu_ilr"].min()),
         "jackknife_mu_max": float(jk["mu_ilr"].max()),
         "free_mu_ilr": float(free.mu),
+        "free_mu_sd_ilr": math.sqrt(max(float(free.var_mu), 0.0)),
+        "free_mu_var_ilr": float(free.var_mu),
         "tau_e_zero_ilr": float(zero.tau_e),
         "tau_e_free_ilr": float(free.tau_e),
     })
@@ -221,18 +250,34 @@ def estimate(surveys: pd.DataFrame, calibration: dict, as_of: str,
     Their posterior uncertainty, sampling error, and poll noise are not conflated
     with the shock common to *all* companies in a new election.
     """
-    if bias_mode not in {"none", "second_round_history"}:
+    modes = {"none", "second_round_history", "experimental_free_mean_2t"}
+    if bias_mode not in modes:
         raise ValueError(f"Invalid second-round correction mode: {bias_mode}")
     if calibration.get("historical_round", 2) != 2:
         raise ValueError("Cannot apply first-round history to a second-round nowcast")
     fit = calibration.get("fit")
     source = calibration["status"]
-    apply_house = bias_mode == "second_round_history"
-    mu = float(calibration["mu_ilr"]) if apply_house and calibration.get("directional_mean_used", False) else 0.0
+    experimental = bias_mode == "experimental_free_mean_2t"
+    apply_house = bias_mode != "none"
+    validated = bool(calibration.get("directional_mean_used", False))
+    if experimental:
+        # Leave rejected mean visible as an explicitly UNVALIDATED alternative.
+        raw_mu, raw_var = calibration.get("free_mu_ilr"), calibration.get("free_mu_var_ilr")
+        if raw_mu is None or raw_var is None:
+            raise ValueError("Experimental free mean unavailable: missing 2T history")
+        mu, var_mu = float(raw_mu), float(raw_var)
+        if not (math.isfinite(mu) and math.isfinite(var_mu) and var_mu >= 0):
+            raise ValueError("Invalid experimental mean or variance")
+    else:
+        mu = float(calibration["mu_ilr"]) if apply_house and validated else 0.0
+        var_mu = 0.0
     common_sd = float(calibration["common_sd_ilr"])
     if not math.isfinite(common_sd):
-        # For p near 1/2, z = log(p/(1-p))/sqrt(2); dp/dz = 1/(2sqrt(2)).
         common_sd = (float(fallback_sd_pp) / 100.0) * 2 * math.sqrt(2)
+    if experimental and not validated:
+        # Conditional sensitivity, not validated predictive uncertainty:
+        # propagate free-mean uncertainty on top of external common-error SD.
+        common_sd = math.hypot(common_sd, math.sqrt(var_mu))
     x = surveys.copy()
     x["house_mean_ilr"] = 0.0
     x["house_mean_applied_ilr"] = 0.0
@@ -275,7 +320,11 @@ def estimate(surveys: pd.DataFrame, calibration: dict, as_of: str,
     coverage = 100.0 * float(w @ house_mask.astype(float) / w.sum())
     row = {
         "bias_mode": bias_mode,
-        "bias_source": "second_round_history_only" if apply_house else "none",
+        "bias_source": ("unvalidated_free_mean_second_round_history" if experimental
+                        else "validated_second_round_history_only" if apply_house else "none"),
+        "experimental_unvalidated_mean": bool(experimental),
+        "directional_mean_validated": validated,
+        "experimental_mu_sd_ilr": math.sqrt(var_mu) if experimental else 0.0,
         "n_house_effects_matched": int(house_mask.sum()),
         "n_house_effects_applied": int(house_mask.sum()) if apply_house else 0,
         "house_weight_covered_pct": coverage,
@@ -284,7 +333,7 @@ def estimate(surveys: pd.DataFrame, calibration: dict, as_of: str,
         "as_of": as_of, "scenario": "mixed_atlas_included" if x["is_mixed_field"].any() else "strict_post_first_round",
         "n_surveys": int(len(x)), "last_field_end": str(x["field_end"].max()),
         "bias_calibration_status": source,
-        "directional_mean_used": bool(apply_house and calibration["directional_mean_used"]),
+        "directional_mean_used": bool(experimental or (apply_house and validated)),
         "polling_lula_pct": polling["median"], "polling_flavio_pct": 100 - polling["median"],
         "polling_lula_lo80": polling["lo80"], "polling_lula_hi80": polling["hi80"],
         "polling_lula_lo95": polling["lo95"], "polling_lula_hi95": polling["hi95"],

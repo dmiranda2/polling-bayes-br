@@ -67,3 +67,48 @@ def test_calendar_only_metadata_no_predictions():
     assert (c["scope"] == "regional").sum() == 8
     assert "bias_flavio_minus_lula_pp" not in c
     assert len(read_current_polls(POLLS, "2026-10-10")) == 3
+
+
+def test_experimental_free_mean_preserves_rejected_signal_and_uncertainty():
+    d = read_current_polls(POLLS, "2026-10-10")
+    hist = {**calibration(), "free_mu_ilr": -0.06398579338771775,
+            "free_mu_var_ilr": 0.042525**2,
+            "directional_mean_used": False}
+    approved, b = estimate(d, hist, "2026-10-10", bias_mode="second_round_history", draws=15000)
+    exploratory, e = estimate(d, hist, "2026-10-10",
+                              bias_mode="experimental_free_mean_2t", draws=15000)
+    rb, rx = approved.iloc[0], exploratory.iloc[0]
+    assert rx["polling_lula_pct"] == rb["polling_lula_pct"]
+    assert rx["polling_latent_sd_ilr"] == rb["polling_latent_sd_ilr"]
+    assert np.allclose(b["obs_var_ilr"], e["obs_var_ilr"])
+    assert rx["counterfactual_lula_pct"] > rb["counterfactual_lula_pct"] + 2
+    assert rx["common_error_sd_ilr"] > rb["common_error_sd_ilr"]
+    assert rx["experimental_unvalidated_mean"]
+    assert rx["directional_mean_used"] and not rx["directional_mean_validated"]
+    assert not rb["directional_mean_used"]
+    assert rx["mean_common_shift_applied_ilr"] < 0
+
+
+def test_experimental_free_mean_requires_independent_2t_data():
+    d = read_current_polls(POLLS, "2026-10-10")
+    with pytest.raises(ValueError, match="free mean unavailable"):
+        estimate(d, calibration(), "2026-10-10",
+                 bias_mode="experimental_free_mean_2t")
+
+
+def test_experimental_free_mean_rejects_1t_history():
+    d = read_current_polls(POLLS, "2026-10-10")
+    hist = {**calibration(), "historical_round": 1,
+            "free_mu_ilr": -0.06, "free_mu_var_ilr": 0.002}
+    with pytest.raises(ValueError, match="first-round"):
+        estimate(d, hist, "2026-10-10",
+                 bias_mode="experimental_free_mean_2t")
+
+
+def test_experimental_atlas_remains_sensitivity():
+    d = read_current_polls(POLLS, "2026-10-10", include_mixed=True)
+    hist = {**calibration(), "free_mu_ilr": -0.06, "free_mu_var_ilr": 0.002}
+    result, used = estimate(d, hist, "2026-10-10",
+                            bias_mode="experimental_free_mean_2t", draws=5000)
+    assert result.iloc[0]["scenario"] == "mixed_atlas_included"
+    assert set(used.pollster) == {"PoderData", "Datafolha", "Vox Brasil", "AtlasIntel"}
