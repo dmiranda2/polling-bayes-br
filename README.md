@@ -44,6 +44,12 @@ Agregador experimental de pesquisas nacionais para a eleição presidencial bras
 
 > **Versão atual: v0.9.1**
 
+## Comparação retrospectiva do primeiro turno (experimental)
+
+Preservamos um script independente para comparar a v0.9.1 de primeiro turno sem correção e uma correção direcional exploratória estimada de pesquisas e resultados de PRIMEIROS turnos históricos anteriores a 2026. O acerto retrospectivo no pleito de 2026 não valida o método; a média livre não venceu o critério histórico LOO em relação ao prior externo. O experimento não é a ponderação da v0.8 e não afeta o modelo de SEGUNDO turno.
+
+Documentação: [contrafactual histórico do primeiro turno](docs/FIRST_ROUND_BIAS_RETROSPECTIVE.md). Script: [first_round_counterfactual.py](src/first_round_counterfactual.py).
+
 ## Em 30 segundos
 
 O projeto pega as pesquisas nacionais mais recentes, coloca todas na **mesma base de votos válidos** e estima um retrato agregado da corrida eleitoral.
