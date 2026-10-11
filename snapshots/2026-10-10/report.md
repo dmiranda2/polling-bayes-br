@@ -1,36 +1,48 @@
-# Segundo turno: nowcast 10/10/2026, somente histórico de 2º turno
+# Segundo turno — três modos preservados (10/10/2026)
 
-Este retrato substitui integralmente o snapshot anterior, que havia empregado indevidamente erros de primeiro turno de 2026. Não há transferência de viés de primeiro turno nesta versão.
+Este snapshot reproduz o cálculo com dados nacionais disponíveis até 10/10/2026.
+**O terceiro modo usa uma hipótese histórica não validada. Não é uma previsão da urna de 25/10.**
 
-Reprodução do cálculo: [GitHub Actions run 38096531189](https://github.com/dmiranda2/polling-bayes-br/actions/runs/38096531189) — **58 testes aprovados**.
+Execução reproduzível: [GitHub Actions #38099999954](https://github.com/dmiranda2/polling-bayes-br/actions/runs/38099999954); **70 testes aprovados**.
 
-## Agregado em votos válidos
+## Consenso das pesquisas versus sensibilidade condicional ao erro comum
 
-| Seleção | Correção | Lula | Flávio | IC80% para consenso Lula |
-|---|---|---:|---:|---|
-| Principal | Sem correção | 48.28% | 51.72% | 46.81–49.76% |
-| Principal | Com ajuste histórico 2T | 48.31% | 51.69% | 46.84–49.78% |
-| Sensibilidade Atlas | Sem correção | 48.05% | 51.95% | 46.75–49.35% |
-| Sensibilidade Atlas | Com ajuste histórico 2T | 48.07% | 51.93% | 46.77–49.37% |
+| Seleção | Método | Lula no consenso | Flávio no consenso | Lula no cenário condicional (80%) | Flávio no cenário condicional |
+|---|---|---:|---:|---:|---:|
+| Principal (3 pesquisas) | Sem correção | 48.28% | 51.72% | 48.26% [44.78–51.83] | 51.74% |
+| Principal (3 pesquisas) | Correção histórica aceita | 48.31% | 51.69% | 48.29% [44.80–51.85] | 51.71% |
+| Principal (3 pesquisas) | EXPERIMENTAL: média livre não validada | 48.31% | 51.69% | 50.54% [46.56–54.61] | 49.46% |
+| Sensibilidade Atlas (4) | Sem correção | 48.05% | 51.95% | 48.03% [44.60–51.53] | 51.97% |
+| Sensibilidade Atlas (4) | Correção histórica aceita | 48.07% | 51.93% | 48.04% [44.62–51.55] | 51.96% |
+| Sensibilidade Atlas (4) | EXPERIMENTAL: média livre não validada | 48.07% | 51.93% | 50.30% [46.37–54.30] | 49.70% |
 
-No cenário principal, o ajuste histórico de segundo turno muda a estimativa de Lula em **+0.024 ponto percentual**. Incluir a pesquisa Atlas, cujo campo incluiu dias anteriores ao primeiro turno de 04/10, é apenas análise de sensibilidade.
+**Importante:** a média livre altera somente o cenário condicional; o consenso das pesquisas não é deslocado por ela.
+Os cenários principal e com histórico de instituto permanecem com a média comum direcional rejeitada (zero).
+No terceiro cenário, o deslocamento de erro comum é explicitamente experimental e o intervalo inclui a incerteza estimada de sua média.
 
-## Metodologia e limites
+## O sinal histórico preservado
 
-- Todos os levantamentos atuais usados são perguntas **de segundo turno**; três entram no cenário principal (PoderData, Vox Brasil, Datafolha).
-- O ajuste por instituto é estimado exclusivamente a partir de pesquisas nacionais de **segundo turno** de eleições anteriores, comparadas com a urna de **segundo turno** desses anos.
-- O erro comum direcional histórico foi **rejeitado** no LOO por eleição inteira: não há deslocamento direcional comum aplicado.
-- A calibração usada foi a janela histórica 14–21 dias antes da urna. São quatro eleições com dados elegíveis e 23 levantamentos na janela.
-- O histórico identificou efeitos específicos para dois dos três institutos no cenário principal; o peso estatístico coberto foi 77,12%. O ajuste resultante é muito pequeno.
-- Ambos os modos usam o mesmo conjunto de observações, mesma ponderação amostral e mesmas escalas de incerteza.
-- O prior externo de erro eleitoral comum de 2,5 p.p. não é uma correção direcional: representa apenas incerteza da votação hipotética hoje.
-- Resultados futuros listados no calendário não foram imputados nem utilizados. Gerp BR-05187 e Correio do Povo/TO BR-06778 seguem sinalizados por inconsistências de data.
+| Segundo turno | Institutos | PT: pesquisa menos urna (p.p.) |
+|---|---:|---:|
+| 2006 | 2 | -4.20 |
+| 2010 | 4 | -1.84 |
+| 2014 | 6 | -4.11 |
+| 2022 | 11 | +1.19 |
 
-**Trata-se de nowcast com dados disponíveis até 10/10, não de previsão do resultado em 25/10/2026.**
+- Média livre no balanço ILR: **-0.063986**; erro padrão **0.042525**.
+- Janela histórica: **14:21 dias** antes de cada segundo turno; 23 pesquisas em 4 eleições.
+- Logscore LOO livre: **1.69**; média zero: **3.58**; prior externo: **4.05** (maior é melhor).
+- Correção direcional comum no modelo principal: **rejeitada**.
 
-## Arquivos relacionados
+**Por que não é conclusivo?** Os desvios de pesquisas realizadas duas a três semanas antes da eleição em relação à urna incorporam tanto erro de medição quanto possíveis mudanças reais da preferência eleitoral. O histórico cobre apenas quatro eleições nesta janela. A média livre perdeu no backtest por eleição inteira.
 
-- [CSV reproduzido deste snapshot](nowcast.csv)
-- [Código do segundo turno](../../src/runoff_nowcast.py)
-- [Documentação das correções](../../docs/SECOND_ROUND_DESIGN.md)
-- [Auditoria e saídas completas da execução](https://github.com/dmiranda2/polling-bayes-br/actions/runs/38096531189)
+## Arquivos de auditoria
+
+- [Todos os seis resultados, com intervalos de 80% e 95%](nowcast.csv)
+- [Parâmetros e decisões da calibração histórica](calibration_audit.json)
+- [Erros observados em cada eleição da janela](historical_election_errors.csv)
+- [Código do agregador](../../src/runoff_nowcast.py)
+- [Metodologia e ressalvas](../../docs/SECOND_ROUND_DESIGN.md)
+- [Saídas completas e histórico por instituto da execução](https://github.com/dmiranda2/polling-bayes-br/actions/runs/38099999954)
+
+Nenhum viés do primeiro turno de 2026 nem resultado futuro foi usado no cálculo.
