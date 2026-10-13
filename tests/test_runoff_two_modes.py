@@ -66,7 +66,7 @@ def test_calendar_only_metadata_no_predictions():
     assert (c["scope"] == "national").sum() == 11
     assert (c["scope"] == "regional").sum() == 8
     assert "bias_flavio_minus_lula_pp" not in c
-    assert len(read_current_polls(POLLS, "2026-10-10")) == 3
+    assert len(read_current_polls(POLLS, "2026-10-10")) == 4
 
 
 def test_experimental_free_mean_preserves_rejected_signal_and_uncertainty():
@@ -111,4 +111,17 @@ def test_experimental_atlas_remains_sensitivity():
     result, used = estimate(d, hist, "2026-10-10",
                             bias_mode="experimental_free_mean_2t", draws=5000)
     assert result.iloc[0]["scenario"] == "mixed_atlas_included"
-    assert set(used.pollster) == {"PoderData", "Datafolha", "Vox Brasil", "AtlasIntel"}
+    assert set(used.pollster) == {"PoderData", "Datafolha", "Vox Brasil", "AtlasIntel", "Ipespe"}
+
+
+def test_october_13_new_round_replaces_old_poderdata_and_keeps_atlas_separate():
+    current = read_current_polls(POLLS, "2026-10-13")
+    assert len(current) == 7
+    assert set(current.pollster) == {"Datafolha", "PoderData", "Vox Brasil", "Ipespe", "DataTrends", "Nexus", "Gerp"}
+    poder = current[current.pollster == "PoderData"].iloc[0]
+    assert poder.poll_id == "BR-01209/2026"
+    assert poder.lula_valid_pct == 49.0
+    assert not current.is_mixed_field.any()
+    with_atlas = read_current_polls(POLLS, "2026-10-13", include_mixed=True)
+    assert len(with_atlas) == 8
+    assert set(with_atlas.loc[with_atlas.is_mixed_field, "pollster"]) == {"AtlasIntel"}
