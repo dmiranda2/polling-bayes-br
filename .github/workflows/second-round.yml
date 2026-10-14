@@ -79,13 +79,29 @@ jobs:
             --out output_second_round_2026_10_13_1_14
           cat output_second_round_2026_10_13/report_2026-10-13.md
           cat output_second_round_2026_10_13_1_14/report_2026-10-13.md
-          python -c "import pandas as pd; x=pd.read_csv('output_second_round_2026_10_13/nowcast_2026-10-13.csv'); assert set(x.n_surveys)=={7,8}; assert len(x)==6"
+          python -c "import pandas as pd; x=pd.read_csv('output_second_round_2026_10_13/nowcast_2026-10-13.csv'); assert set(x.n_surveys)=={8,9}; assert len(x)==6"
+
+      - name: Nowcast 14 October with Quaest and all verified post-first-round polls
+        run: |
+          python src/runoff_nowcast.py \
+            --as-of 2026-10-14 \
+            --history output_history_rounds/round_2/historical_poll_errors.csv \
+            --historical-window 14:21 \
+            --out output_second_round_2026_10_14
+          python src/runoff_nowcast.py \
+            --as-of 2026-10-14 \
+            --history output_history_rounds/round_2/historical_poll_errors.csv \
+            --historical-window 1:14 \
+            --out output_second_round_2026_10_14_1_14
+          cat output_second_round_2026_10_14/report_2026-10-14.md
+          cat output_second_round_2026_10_14_1_14/report_2026-10-14.md
+          python -c "import pandas as pd; x=pd.read_csv('output_second_round_2026_10_14/nowcast_2026-10-14.csv'); assert set(x.n_surveys)=={9,10}; assert set(x.bias_mode)=={'none','second_round_history','experimental_free_mean_2t'}; assert len(x)==6"
 
       - name: Upload complete audit and estimates
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: second-round-three-modes-2026-10-13
+          name: second-round-three-modes-2026-10-14
           path: |
             output_second_round/
             output_second_round_14_21/
@@ -93,5 +109,7 @@ jobs:
             output_history_rounds/
             output_second_round_2026_10_13/
             output_second_round_2026_10_13_1_14/
+            output_second_round_2026_10_14/
+            output_second_round_2026_10_14_1_14/
           if-no-files-found: warn
           retention-days: 60

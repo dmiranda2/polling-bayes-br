@@ -116,12 +116,52 @@ def test_experimental_atlas_remains_sensitivity():
 
 def test_october_13_new_round_replaces_old_poderdata_and_keeps_atlas_separate():
     current = read_current_polls(POLLS, "2026-10-13")
-    assert len(current) == 7
-    assert set(current.pollster) == {"Datafolha", "PoderData", "Vox Brasil", "Ipespe", "DataTrends", "Nexus", "Gerp"}
+    assert len(current) == 8
+    assert set(current.pollster) == {"Datafolha", "PoderData", "Vox Brasil", "Ipespe", "DataTrends", "Nexus", "Gerp", "Futura"}
     poder = current[current.pollster == "PoderData"].iloc[0]
     assert poder.poll_id == "BR-01209/2026"
     assert poder.lula_valid_pct == 49.0
     assert not current.is_mixed_field.any()
     with_atlas = read_current_polls(POLLS, "2026-10-13", include_mixed=True)
-    assert len(with_atlas) == 8
+    assert len(with_atlas) == 9
     assert set(with_atlas.loc[with_atlas.is_mixed_field, "pollster"]) == {"AtlasIntel"}
+
+
+def test_october_14_quaest_is_derived_and_not_visible_on_publication_eve():
+    before = read_current_polls(POLLS, "2026-10-13")
+    assert "Quaest" not in set(before.pollster)
+    current = read_current_polls(POLLS, "2026-10-14")
+    assert len(current) == 9
+    assert current.pollster.nunique() == 9
+    assert not current.is_mixed_field.any()
+    quaest = current[current.pollster.eq("Quaest")].iloc[0]
+    assert quaest.poll_id == "BR-08729/2026"
+    assert quaest.basis == "derived_valid_from_rounded_total"
+    assert quaest.lula_valid_pct == pytest.approx(100 * 44 / (44 + 46))
+    assert quaest.flavio_valid_pct == pytest.approx(100 * 46 / (44 + 46))
+    assert quaest.n_reported == 2154
+    assert quaest.moe_pp == 2
+    assert quaest.field_start == "2026-10-10"
+    assert quaest.field_end == "2026-10-13"
+    assert quaest.publish_date == "2026-10-14"
+    with_atlas = read_current_polls(POLLS, "2026-10-14", include_mixed=True)
+    assert len(with_atlas) == 10
+    assert set(with_atlas.loc[with_atlas.is_mixed_field, "pollster"]) == {"AtlasIntel"}
+
+
+def test_futura_uses_published_valids_and_preserves_reported_totals():
+    import pandas as pd
+    raw = pd.read_csv(POLLS)
+    assert not raw.duplicated(["poll_id", "candidate"]).any()
+    future = raw[raw.poll_id.eq("BR-00650/2026")].set_index("candidate")
+    assert set(future.index) == {"Lula", "Flávio Bolsonaro"}
+    assert future.loc["Lula", "pct"] == 46.6
+    assert future.loc["Flávio Bolsonaro", "pct"] == 50.0
+    assert future.loc["Lula", "pct_valid"] == 48.2
+    assert future.loc["Flávio Bolsonaro", "pct_valid"] == 51.8
+    assert set(future.vote_basis) == {"published_valid"}
+    assert "Futura" not in set(read_current_polls(POLLS, "2026-10-12").pollster)
+    assert "Futura" in set(read_current_polls(POLLS, "2026-10-13").pollster)
+    # Old tracking observations stay auditable while only the latest is fitted.
+    assert {"BR-08134/2026", "BR-01209/2026"} <= set(raw.poll_id)
+    assert set(read_current_polls(POLLS, "2026-10-14").query("pollster == 'PoderData'").poll_id) == {"BR-01209/2026"}

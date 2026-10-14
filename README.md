@@ -1,3 +1,5 @@
+> **Atualização de 14/10/2026:** Quaest e Futura incorporadas às demais pesquisas nacionais verificadas. Nove institutos no cenário principal, Atlas apenas na sensibilidade. Consenso corrigido: **Lula 48,02% / Flávio Bolsonaro 51,98%** dos votos válidos. A Quaest usa normalização calculada dos totais arredondados, não válidos oficiais. [Relatório, fontes e arquivos auditáveis](snapshots/2026-10-14/report.md). Não é previsão da urna de 25/10.
+
 > **Atualização de 10/10/2026 — três leituras do segundo turno:**
 > O pipeline mantém as estimativas sem correção, com correção histórica aceita,
 > e uma sensibilidade EXPERIMENTAL com a média direcional livre de SEGUNDOS
