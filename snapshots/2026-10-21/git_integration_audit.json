@@ -1,0 +1,11 @@
+{
+  "base_commit": "91f156a29dae946e14931138ad91a5ce2735a808",
+  "model_source_unchanged": true,
+  "existing_snapshots_unchanged": true,
+  "legacy_test_input_unchanged": true,
+  "new_snapshot_tests": 5,
+  "total_tests_passed": 78,
+  "delivered_outputs_byte_identical": true,
+  "large_source_pdfs_or_zip_archives_included": false,
+  "reproduction_command": "python snapshots/2026-10-21/run_all.py"
+}

@@ -1,0 +1,8 @@
+{
+  "images": [
+    "medias_moveis_3_dias_2026-10-21.png",
+    "comparativo_tres_saidas_2026-10-21.png"
+  ],
+  "visual_inspection": "Opened full rendered PNGs after final numerical run. Labels, dates, 12/19 institute counts, two candidate colors, final values, separate polling/counterfactual columns and experimental warning checked. No clipped or overlapping elements found.",
+  "numerical_consistency": "Plotted endpoints taken directly from validated CSV, 48.871469% / 51.128531%."
+}

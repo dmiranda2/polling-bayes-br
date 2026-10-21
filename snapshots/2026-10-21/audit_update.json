@@ -1,0 +1,63 @@
+{
+  "as_of": "2026-10-21",
+  "cutoff_brt": "2026-10-21 10:32",
+  "prior_cutoff_brt": "2026-10-19 10:17",
+  "oct20_cutoff_brt": "2026-10-20 13:46",
+  "historical_windows": [
+    "7:14",
+    "14:21",
+    "1:14",
+    "7:10"
+  ],
+  "draws": 30000,
+  "seed": 418,
+  "final_sources_reconciled": true,
+  "max_independent_weight_difference_pp": 1.4210854715202004e-14,
+  "max_independent_result_difference_pp": 0.0,
+  "max_independent_variance_difference_ilr": 8.673617379884035e-19,
+  "new_poll_records": 9,
+  "all_poll_records": 34,
+  "raw_rows": 68,
+  "full_selection_change": {
+    "old_n": 14,
+    "new_n": 19,
+    "removed_ids": [
+      "BR-03576/2026",
+      "BR-06715/2026",
+      "BR-08028/2026",
+      "BR-08729/2026"
+    ],
+    "added_ids": [
+      "BR-00152/2026",
+      "BR-00820/2026",
+      "BR-02952/2026",
+      "BR-04454/2026",
+      "BR-04612/2026",
+      "BR-06614/2026",
+      "BR-07896/2026",
+      "BR-08251/2026",
+      "BR-08535/2026"
+    ]
+  },
+  "recent_n": 12,
+  "historical_calibration_exactly_unchanged": true,
+  "prior_daily_points_through_19oct_byte_exact": true,
+  "prior_daily_inputs_byte_exact": true,
+  "previous_rows_byte_exact": true,
+  "model_code_byte_identical": true,
+  "none_directional_shifts_zero": true,
+  "no_lookahead": true,
+  "weights_sum_100": true,
+  "first_round_bias_transfer": false,
+  "experimental_mean_validated": false,
+  "git_publication": false,
+  "executed_model_rows": 22,
+  "unavailable_model_rows": 2,
+  "data_trends_19oct_after_prior_cutoff_excluded_from_archived_point": true,
+  "excluded": [
+    "Gerp tracking 20 October: field-window / registration unresolved",
+    "Veritá old 17 October republished: no duplicate",
+    "Data Pop BR-01683/2026: Tocantins, not national"
+  ],
+  "tests_stdout": "........................................................................ [ 92%]\n......                                                                   [100%]\n78 passed in 4.58s"
+}

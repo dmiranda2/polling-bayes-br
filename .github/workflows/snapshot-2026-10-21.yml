@@ -1,0 +1,46 @@
+name: Reproduce October 21 polling snapshot
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'snapshots/2026-10-21/**'
+      - 'src/**'
+      - 'tests/**'
+      - '.github/workflows/snapshot-2026-10-21.yml'
+  pull_request:
+    paths:
+      - 'snapshots/2026-10-21/**'
+      - 'src/**'
+      - 'tests/**'
+      - '.github/workflows/snapshot-2026-10-21.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      MPLCONFIGDIR: /tmp/polling-mpl
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: snapshots/2026-10-21/requirements-lock.txt
+      - name: Install frozen dependencies
+        run: pip install -r snapshots/2026-10-21/requirements-lock.txt
+      - name: Reproduce offline and run all regression tests
+        run: python snapshots/2026-10-21/run_all.py
+      - name: Verify committed numerical results are unchanged
+        run: |
+          git diff --exit-code -- \
+            snapshots/2026-10-21/valores_diarios.csv \
+            snapshots/2026-10-21/model_comparison_core_2026-10-21.csv \
+            snapshots/2026-10-21/daily_weights.csv \
+            snapshots/2026-10-21/calibration_all_windows.json

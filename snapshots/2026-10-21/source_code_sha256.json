@@ -1,0 +1,19 @@
+{
+  "common.py": "45e3c88dc41a754f75b701a1ffdb8534ccabd39e709fd9fab7cb9a716d30b386",
+  "fetch_data.py": "236ed1c6a2bd18357e0bef8a28d32084ea4fe605ab6750f99e0aa444d99b8e2b",
+  "runoff_calendar.py": "9098c07e86f0d1c4c612393c24736cc3efca0e602554569cd74a50824e425c2a",
+  "calibrate.py": "856359d43ebf2ec4860eb82e3fbb3d8420fc1330bf9fc16e2698fe65f59a1d2f",
+  "historical_error.py": "d9111faa982aabd7c95d5b4ce1c908a58f11b557265b4d0422fb29d064fd16f7",
+  "plot.py": "befd23b7c5bd3f07be2f78a3c13f5f8778ce817a5f34c9d1448323670175b3c7",
+  "composition.py": "4fd02ecbc6f3239db5c60ccb3a8cf83c7dde3e58e668c3c55f7233e80f471b47",
+  "first_round_counterfactual.py": "36e05c16a12c96613a2bb6b763aefcb1c7c91678b7cd90ffbd384d01a1217bc2",
+  "preprocess.py": "58813e0acef492387c337512ddd5ef042b9dd5871f9e645e456cecef179eccf8",
+  "report.py": "74cc1577e4b195dc1ff1a7242859172d6fffb951cb6fa67dc4714419eed1d2ed",
+  "historical_second_round.py": "d840d7a2eb020ef9b4e3a01197794dedd929d88f2340f4978506da078eba4eb9",
+  "runoff_nowcast.py": "78c74b316f4b4d7d34c6558aaf24aedebbd917fca6b50aa9de5c0c52c1a6f5b5",
+  "backtest.py": "4e85ca293d1859c565369c6f3e23d71725b238902c5693713464969a92c7bc5b",
+  "candidate_status.py": "5a469e90353534fa17c757c12773327ea3748cee9b54978669cdc1e10c9c747b",
+  "model.py": "f37671acd4f3517b7e8c31455690eda68dc634065297b717e01622d65a3a7d9d",
+  "historical_calibration.py": "2927794d9a5db3ffd51844e1bee44df829f7c495115ffac14b173c52e9b87502",
+  "run.py": "0ee85483c13a36ecfdd3f8d14884993973c151fa8078ab0617571a0a7df77a5b"
+}

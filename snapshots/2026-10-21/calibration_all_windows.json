@@ -1,0 +1,195 @@
+{
+  "7:14": {
+    "historical_round": 2,
+    "historical_window_range": "7:14",
+    "status": "external_common_prior_historical_poll_noise",
+    "directional_mean_used": false,
+    "mu_ilr": 0.0,
+    "var_mu_ilr": 0.0,
+    "free_mu_ilr": -0.026555005179350357,
+    "free_mu_sd_ilr": 0.02983780176765894,
+    "free_mu_var_ilr": 0.000890294414326111,
+    "historical_election_poll_minus_urn": [
+      {
+        "election_year": 2006,
+        "n_pollsters": 1,
+        "pt_poll_minus_urn_pp": -0.8265074205259708,
+        "pair_error_ilr": -0.0244377905346449
+      },
+      {
+        "election_year": 2010,
+        "n_pollsters": 4,
+        "pt_poll_minus_urn_pp": -0.4350783622091001,
+        "pair_error_ilr": -0.012332396585287059
+      },
+      {
+        "election_year": 2014,
+        "n_pollsters": 5,
+        "pt_poll_minus_urn_pp": -2.7687578634537755,
+        "pair_error_ilr": -0.07848222945811634
+      },
+      {
+        "election_year": 2022,
+        "n_pollsters": 12,
+        "pt_poll_minus_urn_pp": 0.651156436706693,
+        "pair_error_ilr": 0.018467609603483873
+      }
+    ],
+    "common_sd_ilr": 0.07071067811865477,
+    "tau_h_ilr": 0.05648219638777989,
+    "tau_p_ilr": 0.00033546262790251185,
+    "reasons": [
+      "zero-mean historical common-error scale loses whole-election LOO to 2.5 pp external baseline; retaining second-round poll noise"
+    ],
+    "n_historical_polls": 22,
+    "n_historical_elections": 4,
+    "loo_zero_logscore": 1.0097690046500385,
+    "loo_free_logscore": 1.7556087031428427,
+    "loo_baseline_2p5_logscore": 5.776068533471073,
+    "jackknife_mu_min": -0.04331782061674453,
+    "jackknife_mu_max": 0.005181757567662959,
+    "tau_e_zero_ilr": 0.040066589803690246,
+    "tau_e_free_ilr": 0.04349107873310681
+  },
+  "14:21": {
+    "historical_round": 2,
+    "historical_window_range": "14:21",
+    "status": "external_common_prior_historical_poll_noise",
+    "directional_mean_used": false,
+    "mu_ilr": 0.0,
+    "var_mu_ilr": 0.0,
+    "free_mu_ilr": -0.06398579623524034,
+    "free_mu_sd_ilr": 0.042524691864571716,
+    "free_mu_var_ilr": 0.0018083494181767718,
+    "historical_election_poll_minus_urn": [
+      {
+        "election_year": 2006,
+        "n_pollsters": 2,
+        "pt_poll_minus_urn_pp": -4.2025135306252634,
+        "pair_error_ilr": -0.12266433008949802
+      },
+      {
+        "election_year": 2010,
+        "n_pollsters": 4,
+        "pt_poll_minus_urn_pp": -1.8358348772004003,
+        "pair_error_ilr": -0.0523191227779805
+      },
+      {
+        "election_year": 2014,
+        "n_pollsters": 6,
+        "pt_poll_minus_urn_pp": -4.110174533711641,
+        "pair_error_ilr": -0.11673978564362616
+      },
+      {
+        "election_year": 2022,
+        "n_pollsters": 11,
+        "pt_poll_minus_urn_pp": 1.1859634068959202,
+        "pair_error_ilr": 0.03363212320041883
+      }
+    ],
+    "common_sd_ilr": 0.07071067811865477,
+    "tau_h_ilr": 0.04897386726441314,
+    "tau_p_ilr": 0.02860741239976576,
+    "reasons": [
+      "zero-mean historical common-error scale loses whole-election LOO to 2.5 pp external baseline; retaining second-round poll noise"
+    ],
+    "n_historical_polls": 23,
+    "n_historical_elections": 4,
+    "loo_zero_logscore": 3.584576712799966,
+    "loo_free_logscore": 1.6934678392691298,
+    "loo_baseline_2p5_logscore": 4.049083076082821,
+    "jackknife_mu_min": -0.10503439746537571,
+    "jackknife_mu_max": -0.039371821155221365,
+    "tau_e_zero_ilr": 0.08298615092196782,
+    "tau_e_free_ilr": 0.07468760533844847
+  },
+  "1:14": {
+    "historical_round": 2,
+    "historical_window_range": "1:14",
+    "status": "external_common_prior_historical_poll_noise",
+    "directional_mean_used": false,
+    "mu_ilr": 0.0,
+    "var_mu_ilr": 0.0,
+    "free_mu_ilr": -0.011654987244644902,
+    "free_mu_sd_ilr": 0.017133195906639382,
+    "free_mu_var_ilr": 0.00029354640197528444,
+    "historical_election_poll_minus_urn": [
+      {
+        "election_year": 2006,
+        "n_pollsters": 3,
+        "pt_poll_minus_urn_pp": 0.7063940374179797,
+        "pair_error_ilr": 0.02116637271252949
+      },
+      {
+        "election_year": 2010,
+        "n_pollsters": 5,
+        "pt_poll_minus_urn_pp": -0.7221813350854299,
+        "pair_error_ilr": -0.020514041927377765
+      },
+      {
+        "election_year": 2014,
+        "n_pollsters": 6,
+        "pt_poll_minus_urn_pp": -2.6745829254244993,
+        "pair_error_ilr": -0.0757397786758549
+      },
+      {
+        "election_year": 2022,
+        "n_pollsters": 13,
+        "pt_poll_minus_urn_pp": 0.5717890503572828,
+        "pair_error_ilr": 0.016224620785952673
+      }
+    ],
+    "common_sd_ilr": 0.07071067811865477,
+    "tau_h_ilr": 0.00033546262790251185,
+    "tau_p_ilr": 0.05792943522302302,
+    "reasons": [
+      "zero-mean historical common-error scale loses whole-election LOO to 2.5 pp external baseline; retaining second-round poll noise"
+    ],
+    "n_historical_polls": 27,
+    "n_historical_elections": 4,
+    "loo_zero_logscore": 2.58499297997498,
+    "loo_free_logscore": 1.955911859329181,
+    "loo_baseline_2p5_logscore": 6.090720224691002,
+    "jackknife_mu_min": -0.022767458335188735,
+    "jackknife_mu_max": 0.002434311571339678,
+    "tau_e_zero_ilr": 0.004549602777696356,
+    "tau_e_free_ilr": 0.01938952500701266
+  },
+  "7:10": {
+    "historical_round": 2,
+    "historical_window_range": "7:10",
+    "status": "external_fallback",
+    "directional_mean_used": false,
+    "mu_ilr": 0.0,
+    "var_mu_ilr": 0.0,
+    "free_mu_ilr": null,
+    "free_mu_sd_ilr": null,
+    "free_mu_var_ilr": null,
+    "historical_election_poll_minus_urn": [
+      {
+        "election_year": 2010,
+        "n_pollsters": 2,
+        "pt_poll_minus_urn_pp": 0.674974144034345,
+        "pair_error_ilr": 0.019423769813747053
+      },
+      {
+        "election_year": 2014,
+        "n_pollsters": 3,
+        "pt_poll_minus_urn_pp": -2.9123508282649317,
+        "pair_error_ilr": -0.08270930960724984
+      },
+      {
+        "election_year": 2022,
+        "n_pollsters": 3,
+        "pt_poll_minus_urn_pp": -0.7927056502165003,
+        "pair_error_ilr": -0.02241358790514614
+      }
+    ],
+    "common_sd_ilr": 0.07071067811865477,
+    "tau_h_ilr": 0.0,
+    "tau_p_ilr": 0.0,
+    "reasons": [
+      "insufficient history for window 7:10 (requires four elections and twelve independent polls)"
+    ]
+  }
+}

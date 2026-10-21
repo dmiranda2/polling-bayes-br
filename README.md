@@ -1,3 +1,5 @@
+> **Atualização de 21/10/2026, 10h32 BRT:** nove novas rodadas, incluindo Quaest. Média móvel ponderada de três dias: **Lula 48,87% / Flávio Bolsonaro 51,13%** (12 institutos); seleção completa com 19. Calibração histórica 7:14 mantida. [Relatório, gráficos, dados e reprodução offline](snapshots/2026-10-21/README.md). Consenso das pesquisas e cenários condicionados são separados; a média livre permanece experimental e não validada. Não é previsão para 25/10.
+
 > **Atualização de 14/10/2026:** Quaest e Futura incorporadas às demais pesquisas nacionais verificadas. Nove institutos no cenário principal, Atlas apenas na sensibilidade. Consenso corrigido: **Lula 48,02% / Flávio Bolsonaro 51,98%** dos votos válidos. A Quaest usa normalização calculada dos totais arredondados, não válidos oficiais. [Relatório, fontes e arquivos auditáveis](snapshots/2026-10-14/report.md). Não é previsão da urna de 25/10.
 
 > **Atualização de 10/10/2026 — três leituras do segundo turno:**

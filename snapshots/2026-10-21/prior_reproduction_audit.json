@@ -1,0 +1,20 @@
+{
+  "prior_bundle_sha256": "100116191b7e495043a19f60bdd8fddd9c0b35c4eeedda1abc3bb7a81332230c",
+  "exact_reproduction": {
+    "valores_diarios.csv": true,
+    "calibration_all_windows.json": true,
+    "model_comparison_core_futura_2026-10-19_1017.csv": true,
+    "daily_weights.csv": true
+  },
+  "prior_tests": "........................................................................ [ 98%]\n.                                                                        [100%]\n73 passed in 5.96s\n",
+  "independent_numeric_audit": {
+    "max_independent_weight_difference_pp": 1.4210854715202004e-14,
+    "max_independent_result_difference_pp": 0.0,
+    "max_independent_variance_difference_ilr": 8.673617379884035e-19,
+    "all_calibration_parameters_exactly_unchanged": true,
+    "prior_daily_points_through_18oct_byte_exact": true,
+    "passed": true
+  },
+  "entire_prior_extracted_package_byte_exact": true,
+  "prior_archive_file_count": 309
+}

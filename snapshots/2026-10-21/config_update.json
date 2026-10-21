@@ -1,0 +1,15 @@
+{
+  "as_of": "2026-10-21",
+  "cutoff_brt": "2026-10-21 10:32",
+  "prior_cutoff_brt": "2026-10-19 10:17",
+  "oct20_cutoff_brt": "2026-10-20 13:46",
+  "historical_windows": [
+    "7:14",
+    "14:21",
+    "1:14",
+    "7:10"
+  ],
+  "draws": 30000,
+  "seed": 418,
+  "final_sources_reconciled": true
+}
